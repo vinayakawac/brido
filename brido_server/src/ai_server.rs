@@ -56,7 +56,28 @@ pub struct AnalyseResponse {
     pub model_used: String,
 }
 
+#[derive(Serialize)]
+pub struct QrInfoResponse {
+    pub ip: String,
+    pub port: u16,
+    pub pin: String,
+}
+
 // ── Handlers ────────────────────────────────────────────────────────────────
+
+/// No auth required — returns info for QR code generation
+pub async fn handle_qr_info(
+    State(state): State<Arc<AppState>>,
+) -> Json<QrInfoResponse> {
+    let ip = local_ip_address::local_ip()
+        .map(|ip| ip.to_string())
+        .unwrap_or_else(|_| "0.0.0.0".to_string());
+    Json(QrInfoResponse {
+        ip,
+        port: state.config.port,
+        pin: state.config.pin.clone(),
+    })
+}
 
 pub async fn handle_connect(
     State(state): State<Arc<AppState>>,

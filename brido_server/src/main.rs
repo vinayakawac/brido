@@ -49,7 +49,11 @@ async fn main() -> anyhow::Result<()> {
     println!("║  IP Address : {:<23} ║", local_ip);
     println!("║  Port       : {:<23} ║", port);
     println!("║  PIN        : {:<23} ║", config.pin);
+    println!("╠═══════════════════════════════════════╣");
+    println!("║  QR Data    : brido://{}:{}:{}", local_ip, config.port, config.pin);
     println!("╚═══════════════════════════════════════╝");
+    println!();
+    println!("Scan the QR data string above from the Android app.");
     println!();
 
     let (frame_tx, _) = broadcast::channel::<Vec<u8>>(2);
@@ -102,6 +106,7 @@ async fn main() -> anyhow::Result<()> {
 
     let app = Router::new()
         .route("/api/connect", post(ai_server::handle_connect))
+        .route("/api/qr-info", get(ai_server::handle_qr_info))
         .route("/api/system-info", get(ai_server::handle_system_info))
         .route("/api/models", get(ai_server::handle_models))
         .route("/api/analyse", post(ai_server::handle_analyse))

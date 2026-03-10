@@ -1,0 +1,11 @@
+C:\Users\vinay\AndroidStudioProjects\brido\brido_server\target\release\deps\scrap-a1b59657fd82dc9c.d: C:\Users\vinay\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\scrap-0.5.0\src\lib.rs C:\Users\vinay\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\scrap-0.5.0\src\dxgi\mod.rs C:\Users\vinay\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\scrap-0.5.0\src\dxgi\ffi.rs C:\Users\vinay\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\scrap-0.5.0\src\common\mod.rs C:\Users\vinay\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\scrap-0.5.0\src\common\dxgi.rs
+
+C:\Users\vinay\AndroidStudioProjects\brido\brido_server\target\release\deps\libscrap-a1b59657fd82dc9c.rlib: C:\Users\vinay\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\scrap-0.5.0\src\lib.rs C:\Users\vinay\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\scrap-0.5.0\src\dxgi\mod.rs C:\Users\vinay\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\scrap-0.5.0\src\dxgi\ffi.rs C:\Users\vinay\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\scrap-0.5.0\src\common\mod.rs C:\Users\vinay\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\scrap-0.5.0\src\common\dxgi.rs
+
+C:\Users\vinay\AndroidStudioProjects\brido\brido_server\target\release\deps\libscrap-a1b59657fd82dc9c.rmeta: C:\Users\vinay\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\scrap-0.5.0\src\lib.rs C:\Users\vinay\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\scrap-0.5.0\src\dxgi\mod.rs C:\Users\vinay\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\scrap-0.5.0\src\dxgi\ffi.rs C:\Users\vinay\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\scrap-0.5.0\src\common\mod.rs C:\Users\vinay\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\scrap-0.5.0\src\common\dxgi.rs
+
+C:\Users\vinay\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\scrap-0.5.0\src\lib.rs:
+C:\Users\vinay\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\scrap-0.5.0\src\dxgi\mod.rs:
+C:\Users\vinay\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\scrap-0.5.0\src\dxgi\ffi.rs:
+C:\Users\vinay\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\scrap-0.5.0\src\common\mod.rs:
+C:\Users\vinay\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\scrap-0.5.0\src\common\dxgi.rs:

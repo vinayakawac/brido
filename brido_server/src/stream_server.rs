@@ -6,7 +6,7 @@ use axum::{
     response::{IntoResponse, Response},
     http::StatusCode,
 };
-use futures_util::SinkExt;
+use futures_util::{SinkExt, StreamExt};
 use serde::Deserialize;
 use std::sync::Arc;
 
@@ -38,7 +38,8 @@ async fn handle_stream(socket: WebSocket, state: Arc<AppState>) {
     loop {
         match rx.recv().await {
             Ok(frame_data) => {
-                if sender.send(Message::Binary(frame_data.into())).await.is_err() {
+                let msg: Message = Message::Binary(frame_data.into());
+                if sender.send(msg).await.is_err() {
                     break;
                 }
             }

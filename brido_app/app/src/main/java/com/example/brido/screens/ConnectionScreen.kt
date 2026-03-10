@@ -118,42 +118,12 @@ fun ConnectionScreen(
         Spacer(Modifier.height(8.dp))
 
         when (selectedTab) {
-            0 -> QrCodeTab()
+            0 -> QrScannerTab { data ->
+                viewModel.serverIp = data.ip
+                viewModel.pin = data.pin
+                viewModel.connect(onConnected)
+            }
             1 -> ManualEntryTab(viewModel, onConnected)
-        }
-    }
-}
-
-@Composable
-private fun QrCodeTab() {
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(300.dp)
-            .padding(16.dp)
-            .background(BridoSurface, RoundedCornerShape(12.dp)),
-        contentAlignment = Alignment.Center,
-    ) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Icon(
-                Icons.Default.QrCodeScanner,
-                contentDescription = null,
-                tint = BridoTextSecondary,
-                modifier = Modifier.size(64.dp),
-            )
-            Spacer(Modifier.height(16.dp))
-            Text(
-                "QR Code scanning",
-                color = BridoTextPrimary,
-                fontSize = 18.sp,
-                fontWeight = FontWeight.Medium,
-            )
-            Spacer(Modifier.height(8.dp))
-            Text(
-                "Coming soon — use Manual Entry",
-                color = BridoTextSecondary,
-                fontSize = 14.sp,
-            )
         }
     }
 }
