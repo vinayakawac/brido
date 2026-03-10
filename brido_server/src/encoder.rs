@@ -29,7 +29,7 @@ impl FrameEncoder {
             dynamic.resize(
                 self.target_width,
                 self.target_height,
-                image::imageops::FilterType::Triangle,
+                image::imageops::FilterType::Nearest,
             )
         } else {
             dynamic

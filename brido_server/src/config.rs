@@ -18,8 +18,8 @@ impl Default for Config {
         Self {
             port: 8080,
             pin: generate_pin(),
-            capture_fps: 30,
-            capture_quality: 75,
+            capture_fps: 15,
+            capture_quality: 65,
             target_width: 1280,
             target_height: 720,
             ollama_url: "http://localhost:11434".to_string(),

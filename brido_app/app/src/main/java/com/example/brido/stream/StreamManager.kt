@@ -22,6 +22,7 @@ class StreamManager(
             RetrofitClient.trustManager
         )
         .hostnameVerifier { _, _ -> true }
+        .connectTimeout(5, TimeUnit.SECONDS)
         .readTimeout(0, TimeUnit.MILLISECONDS)
         .pingInterval(10, TimeUnit.SECONDS)
         .build()

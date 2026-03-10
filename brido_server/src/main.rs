@@ -1,3 +1,5 @@
+#![windows_subsystem = "windows"]
+
 mod ai_server;
 mod capture;
 mod config;
@@ -30,6 +32,8 @@ pub struct AppState {
     pub active_tokens: RwLock<HashSet<String>>,
     pub http_client: reqwest::Client,
     pub connected_count: Arc<AtomicUsize>,
+    /// Keeps one receiver alive so the capture thread doesn't exit when no WebSocket clients are connected.
+    _keep_alive_rx: broadcast::Receiver<Vec<u8>>,
 }
 
 /// Spawns the axum server + screen capture on a background thread with its own tokio runtime.
@@ -65,7 +69,7 @@ pub fn start_server(
             let target_h = config.target_height;
             let quality = config.capture_quality;
 
-            let (frame_tx, _) = broadcast::channel::<Vec<u8>>(2);
+            let (frame_tx, keep_alive_rx) = broadcast::channel::<Vec<u8>>(8);
             let tx = frame_tx.clone();
 
             // Screen capture in a dedicated OS thread (scrap types are !Send)
@@ -108,6 +112,7 @@ pub fn start_server(
                 active_tokens: RwLock::new(HashSet::new()),
                 http_client: reqwest::Client::new(),
                 connected_count: connected_count_clone,
+                _keep_alive_rx: keep_alive_rx,
             });
 
             let app = Router::new()
