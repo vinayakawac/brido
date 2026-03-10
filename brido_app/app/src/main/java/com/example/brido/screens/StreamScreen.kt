@@ -102,8 +102,8 @@ private fun StreamViewer(
 ) {
     Box(
         modifier = modifier
-            .padding(8.dp)
-            .clip(RoundedCornerShape(8.dp))
+            .fillMaxWidth()
+            .aspectRatio(16f / 10f)
             .background(Color.Black),
         contentAlignment = Alignment.Center,
     ) {

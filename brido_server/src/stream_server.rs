@@ -33,7 +33,15 @@ pub async fn ws_handler(
 
 async fn handle_stream(socket: WebSocket, state: Arc<AppState>) {
     let mut rx = state.frame_tx.subscribe();
-    let (mut sender, mut _receiver) = socket.split();
+    let (mut sender, mut receiver) = socket.split();
+
+    // Spawn a task that reads incoming messages (handles ping/pong automatically)
+    let recv_task = tokio::spawn(async move {
+        while let Some(Ok(_msg)) = receiver.next().await {
+            // axum handles ping/pong at the protocol level;
+            // we just need to keep reading so the connection stays alive.
+        }
+    });
 
     loop {
         match rx.recv().await {
@@ -50,4 +58,6 @@ async fn handle_stream(socket: WebSocket, state: Arc<AppState>) {
             Err(_) => break,
         }
     }
+
+    recv_task.abort();
 }
