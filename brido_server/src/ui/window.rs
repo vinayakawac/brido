@@ -66,7 +66,7 @@ impl BridoApp {
         shutdown_flag: Arc<AtomicBool>,
         restart_flag: Arc<AtomicBool>,
     ) -> Self {
-        let qr_payload = format!("brido://connect?ip={}&pin={}&port={}", ip, pin, port);
+        let qr_payload = format!("brido://{}:{}:{}", ip, port, pin);
         Self {
             ip,
             pin,
@@ -84,7 +84,7 @@ impl BridoApp {
     pub fn refresh_qr(&mut self, ip: String, pin: String) {
         self.ip = ip;
         self.pin = pin;
-        self.qr_payload = format!("brido://connect?ip={}&pin={}&port={}", self.ip, self.pin, self.port);
+        self.qr_payload = format!("brido://{}:{}:{}", self.ip, self.port, self.pin);
         self.qr_texture = None; // will be re-created next frame
         self.header.reset();
     }

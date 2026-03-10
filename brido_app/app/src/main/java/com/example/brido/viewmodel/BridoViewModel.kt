@@ -23,6 +23,7 @@ class BridoViewModel : ViewModel() {
 
     // ── Connection state ─────────────────────────────────────────────────
     var serverIp by mutableStateOf("")
+    var serverPort by mutableStateOf(8080)
     var pin by mutableStateOf("")
     var isConnecting by mutableStateOf(false)
     var isConnected by mutableStateOf(false)
@@ -56,7 +57,7 @@ class BridoViewModel : ViewModel() {
             connectionError = null
 
             try {
-                val service = RetrofitClient.getService(serverIp)
+                val service = RetrofitClient.getService(serverIp, serverPort)
                 apiService = service
 
                 val response = withContext(Dispatchers.IO) {
@@ -109,7 +110,7 @@ class BridoViewModel : ViewModel() {
             },
         )
 
-        streamManager?.connect(serverIp, 8080, token)
+        streamManager?.connect(serverIp, serverPort, token)
     }
 
     fun analyse() {

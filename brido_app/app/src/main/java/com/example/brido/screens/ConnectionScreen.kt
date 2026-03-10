@@ -120,6 +120,7 @@ fun ConnectionScreen(
         when (selectedTab) {
             0 -> QrScannerTab { data ->
                 viewModel.serverIp = data.ip
+                viewModel.serverPort = data.port
                 viewModel.pin = data.pin
                 viewModel.connect(onConnected)
             }
