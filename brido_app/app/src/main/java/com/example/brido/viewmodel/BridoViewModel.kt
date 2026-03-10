@@ -154,6 +154,18 @@ class BridoViewModel : ViewModel() {
         }
     }
 
+    fun disconnect() {
+        streamManager?.disconnect()
+        streamManager = null
+        isStreaming = false
+        isConnected = false
+        currentFrame = null
+        token = ""
+        terminalLines.clear()
+        connectionError = null
+        apiService = null
+    }
+
     override fun onCleared() {
         super.onCleared()
         streamManager?.disconnect()

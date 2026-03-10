@@ -8,7 +8,7 @@ mod tls;
 mod ui;
 
 use std::collections::HashSet;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -29,12 +29,24 @@ pub struct AppState {
     pub frame_tx: broadcast::Sender<Vec<u8>>,
     pub active_tokens: RwLock<HashSet<String>>,
     pub http_client: reqwest::Client,
+    pub connected_count: Arc<AtomicUsize>,
 }
 
 /// Spawns the axum server + screen capture on a background thread with its own tokio runtime.
-fn start_server(config: Config) -> Arc<AtomicBool> {
-    let server_ready = Arc::new(AtomicBool::new(false));
-    let ready_clone = server_ready.clone();
+/// Accepts shared `server_ready` and `connected_count` so the GUI can track state across restarts.
+/// Returns an `axum_server::Handle` that can be used to shut the server down.
+pub fn start_server(
+    config: Config,
+    server_ready: Arc<AtomicBool>,
+    connected_count: Arc<AtomicUsize>,
+) -> axum_server::Handle {
+    server_ready.store(false, Ordering::SeqCst);
+    connected_count.store(0, Ordering::SeqCst);
+
+    let ready_clone = server_ready;
+    let count_clone = connected_count;
+    let handle = axum_server::Handle::new();
+    let handle_for_server = handle.clone();
 
     let ip = local_ip_address::local_ip()
         .map(|ip| ip.to_string())
@@ -75,7 +87,10 @@ fn start_server(config: Config) -> Arc<AtomicBool> {
                         if let Ok(jpeg) =
                             encoder.encode(&rgb, cap.width() as u32, cap.height() as u32)
                         {
-                            let _ = tx.send(jpeg);
+                            // Exit if no receivers (server was shut down)
+                            if tx.send(jpeg).is_err() {
+                                break;
+                            }
                         }
                     }
                     let elapsed = start.elapsed();
@@ -85,11 +100,14 @@ fn start_server(config: Config) -> Arc<AtomicBool> {
                 }
             });
 
+            let connected_count_clone = count_clone;
+
             let state = Arc::new(AppState {
                 config,
                 frame_tx,
                 active_tokens: RwLock::new(HashSet::new()),
                 http_client: reqwest::Client::new(),
+                connected_count: connected_count_clone,
             });
 
             let app = Router::new()
@@ -102,11 +120,18 @@ fn start_server(config: Config) -> Arc<AtomicBool> {
                 .layer(CorsLayer::permissive())
                 .with_state(state);
 
-            let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{port}"))
-                .await
-                .expect("Failed to bind port");
+            let listener = loop {
+                match tokio::net::TcpListener::bind(format!("0.0.0.0:{port}")).await {
+                    Ok(l) => break l,
+                    Err(e) => {
+                        eprintln!("Port {port} busy, retrying… ({e})");
+                        tokio::time::sleep(Duration::from_millis(300)).await;
+                    }
+                }
+            };
 
             ready_clone.store(true, Ordering::SeqCst);
+            println!("  Server ready — listening on https://{ip}:{port}");
             tracing::info!("Listening (HTTPS) on 0.0.0.0:{port}");
 
             // Generate self-signed TLS certificate
@@ -119,13 +144,16 @@ fn start_server(config: Config) -> Arc<AtomicBool> {
             .expect("Failed to create TLS config");
 
             axum_server::from_tcp_rustls(listener.into_std().unwrap(), rustls_config)
+                .handle(handle_for_server)
                 .serve(app.into_make_service())
                 .await
                 .ok();
+
+            println!("  Server stopped.");
         });
     });
 
-    server_ready
+    handle
 }
 
 fn main() {
@@ -151,9 +179,11 @@ fn main() {
     // Flags shared between UI and server lifecycle
     let shutdown_flag = Arc::new(AtomicBool::new(false));
     let restart_flag = Arc::new(AtomicBool::new(false));
+    let server_ready = Arc::new(AtomicBool::new(false));
+    let connected_count = Arc::new(AtomicUsize::new(0));
 
     // Start the network server + capture on a background thread
-    let server_ready = start_server(config);
+    let axum_handle = start_server(config, server_ready.clone(), connected_count.clone());
 
     // Build the egui application
     let app = BridoApp::new(
@@ -162,6 +192,9 @@ fn main() {
         port,
         shutdown_flag.clone(),
         restart_flag.clone(),
+        server_ready.clone(),
+        connected_count,
+        axum_handle,
     );
 
     let native_options = eframe::NativeOptions {

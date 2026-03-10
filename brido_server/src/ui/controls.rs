@@ -2,6 +2,7 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ControlAction {
     Restart,
+    StopServer,
     Minimize,
     Shutdown,
 }

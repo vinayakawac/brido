@@ -47,7 +47,14 @@ fun BridoNavigation() {
         }
 
         composable(Routes.STREAM) {
-            StreamScreen(viewModel = viewModel)
+            StreamScreen(
+                viewModel = viewModel,
+                onDisconnect = {
+                    navController.navigate(Routes.CONNECTION) {
+                        popUpTo(Routes.STREAM) { inclusive = true }
+                    }
+                },
+            )
         }
     }
 }

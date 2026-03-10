@@ -4,6 +4,7 @@ use axum::{
     Json,
 };
 use serde::{Deserialize, Serialize};
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -89,6 +90,7 @@ pub async fn handle_connect(
 
     let token = Uuid::new_v4().to_string();
     state.active_tokens.write().await.insert(token.clone());
+    state.connected_count.fetch_add(1, Ordering::SeqCst);
 
     let system_info = get_system_info();
     Ok(Json(ConnectResponse { token, system_info }))

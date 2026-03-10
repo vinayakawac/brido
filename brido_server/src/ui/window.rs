@@ -3,7 +3,7 @@ use egui::{
     Align, Color32, CornerRadius, FontFamily, FontId, Layout, RichText,
     Stroke, StrokeKind, TextureHandle, Vec2,
 };
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use super::controls::ControlAction;
@@ -51,11 +51,15 @@ pub struct BridoApp {
     pub pin: String,
     pub port: u16,
     pub status: ServerStatus,
+    pub phone_connected: bool,
     header: HeaderState,
     qr_texture: Option<TextureHandle>,
     qr_payload: String,
     shutdown_flag: Arc<AtomicBool>,
     restart_flag: Arc<AtomicBool>,
+    server_ready: Arc<AtomicBool>,
+    connected_count: Arc<AtomicUsize>,
+    axum_handle: axum_server::Handle,
 }
 
 impl BridoApp {
@@ -65,6 +69,9 @@ impl BridoApp {
         port: u16,
         shutdown_flag: Arc<AtomicBool>,
         restart_flag: Arc<AtomicBool>,
+        server_ready: Arc<AtomicBool>,
+        connected_count: Arc<AtomicUsize>,
+        axum_handle: axum_server::Handle,
     ) -> Self {
         let qr_payload = format!("brido://{}:{}:{}", ip, port, pin);
         Self {
@@ -72,11 +79,15 @@ impl BridoApp {
             pin,
             port,
             status: ServerStatus::Running,
+            phone_connected: false,
             header: HeaderState::default(),
             qr_texture: None,
             qr_payload,
             shutdown_flag,
             restart_flag,
+            server_ready,
+            connected_count,
+            axum_handle,
         }
     }
 
@@ -93,7 +104,29 @@ impl BridoApp {
         match action {
             ControlAction::Restart => {
                 self.status = ServerStatus::Starting;
-                self.restart_flag.store(true, Ordering::SeqCst);
+                // Shut down the old server gracefully
+                self.axum_handle.shutdown();
+                // Create a new config (generates a new PIN)
+                let new_config = crate::config::Config::default();
+                self.pin = new_config.pin.clone();
+                let new_ip = local_ip_address::local_ip()
+                    .map(|ip| ip.to_string())
+                    .unwrap_or_else(|_| "unknown".to_string());
+                self.ip = new_ip;
+                println!("  Restarting server… new PIN: {}", self.pin);
+                // Start a new server (reuses the same shared ready / count flags)
+                self.axum_handle = crate::start_server(
+                    new_config,
+                    self.server_ready.clone(),
+                    self.connected_count.clone(),
+                );
+                // Update QR code
+                self.qr_payload = format!("brido://{}:{}:{}", self.ip, self.port, self.pin);
+                self.qr_texture = None;
+                self.header.reset();
+            }
+            ControlAction::StopServer => {
+                self.status = ServerStatus::Stopped;
             }
             ControlAction::Minimize => {
                 ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
@@ -108,9 +141,18 @@ impl BridoApp {
 
 impl eframe::App for BridoApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        // Request repaint during typing animation
-        if !self.header.is_collapsed() {
+        // Request repaint during typing animation or when waiting for server
+        if !self.header.is_collapsed() || self.status == ServerStatus::Starting {
             ctx.request_repaint();
+        }
+
+        // Update phone connection status from shared counter
+        self.phone_connected = self.connected_count.load(Ordering::SeqCst) > 0;
+
+        // Transition Starting → Running when the server signals ready
+        if self.status == ServerStatus::Starting && self.server_ready.load(Ordering::SeqCst) {
+            self.status = ServerStatus::Running;
+            println!("  Server is now running.");
         }
 
         // Lazy-init QR texture
@@ -140,14 +182,31 @@ impl eframe::App for BridoApp {
                     ui.label(RichText::new(text).font(font).color(TEXT_PRIMARY));
 
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        let dot = RichText::new("●")
-                            .color(self.status.color())
-                            .size(14.0);
-                        let label = RichText::new(self.status.label())
-                            .color(self.status.color())
-                            .size(13.0);
-                        ui.label(label);
-                        ui.label(dot);
+                        // Phone connected status
+                        ui.vertical(|ui| {
+                            ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
+                                let dot = RichText::new("■")
+                                    .color(self.status.color())
+                                    .size(12.0);
+                                let label = RichText::new(self.status.label())
+                                    .color(self.status.color())
+                                    .size(12.0);
+                                ui.label(label);
+                                ui.label(dot);
+                            });
+                            ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
+                                let pc_color = if self.phone_connected { ACCENT } else { TEXT_SECONDARY };
+                                let pc_label = if self.phone_connected { "phone connected" } else { "phone disconnected" };
+                                let dot = RichText::new("■")
+                                    .color(pc_color)
+                                    .size(12.0);
+                                let label = RichText::new(pc_label)
+                                    .color(pc_color)
+                                    .size(12.0);
+                                ui.label(label);
+                                ui.label(dot);
+                            });
+                        });
                     });
                 });
 
@@ -239,41 +298,49 @@ impl eframe::App for BridoApp {
                     });
 
                 // Fill remaining space before buttons
-                ui.add_space(ui.available_height() - 56.0);
+                ui.add_space(ui.available_height() - 100.0);
 
                 // ── Control Buttons ──────────────────────────────────
+                let make_btn =
+                    |ui: &mut egui::Ui, label: &str, color: Color32, w: f32, h: f32| -> bool {
+                        let (rect, response) = ui.allocate_exact_size(
+                            Vec2::new(w, h),
+                            egui::Sense::click(),
+                        );
+                        let fill = if response.hovered() { SURFACE_HOVER } else { SURFACE };
+                        ui.painter().rect(
+                            rect,
+                            CornerRadius::same(8),
+                            fill,
+                            Stroke::new(1.0, color.linear_multiply(0.4)),
+                            StrokeKind::Outside,
+                        );
+                        ui.painter().text(
+                            rect.center(),
+                            egui::Align2::CENTER_CENTER,
+                            label,
+                            FontId::new(14.0, FontFamily::Proportional),
+                            color,
+                        );
+                        response.clicked()
+                    };
+
+                // Full-width restart server button
+                let avail_w = ui.available_width();
+                if make_btn(ui, "restart server", ACCENT, avail_w, 44.0) {
+                    action = Some(ControlAction::Restart);
+                }
+
+                ui.add_space(8.0);
+
+                // Row of 3 smaller buttons
                 ui.horizontal(|ui| {
-                    let btn_height = 44.0;
-                    let avail = ui.available_width();
+                    let btn_height = 36.0;
                     let spacing = ui.spacing().item_spacing.x;
-                    let btn_width = (avail - spacing * 2.0) / 3.0;
+                    let btn_width = (avail_w - spacing * 2.0) / 3.0;
 
-                    let make_btn =
-                        |ui: &mut egui::Ui, label: &str, color: Color32, w: f32, h: f32| -> bool {
-                            let (rect, response) = ui.allocate_exact_size(
-                                Vec2::new(w, h),
-                                egui::Sense::click(),
-                            );
-                            let fill = if response.hovered() { SURFACE_HOVER } else { SURFACE };
-                            ui.painter().rect(
-                                rect,
-                                CornerRadius::same(8),
-                                fill,
-                                Stroke::new(1.0, color.linear_multiply(0.4)),
-                                StrokeKind::Outside,
-                            );
-                            ui.painter().text(
-                                rect.center(),
-                                egui::Align2::CENTER_CENTER,
-                                label,
-                                FontId::new(14.0, FontFamily::Proportional),
-                                color,
-                            );
-                            response.clicked()
-                        };
-
-                    if make_btn(ui, "restart server", ACCENT, btn_width, btn_height) {
-                        action = Some(ControlAction::Restart);
+                    if make_btn(ui, "stop server", TEXT_PRIMARY, btn_width, btn_height) {
+                        action = Some(ControlAction::StopServer);
                     }
                     if make_btn(ui, "minimize", TEXT_PRIMARY, btn_width, btn_height) {
                         action = Some(ControlAction::Minimize);

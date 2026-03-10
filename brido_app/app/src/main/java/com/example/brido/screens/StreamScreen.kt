@@ -24,6 +24,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.systemBars
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
@@ -41,11 +44,12 @@ import com.example.brido.ui.theme.BridoTextSecondary
 import com.example.brido.viewmodel.BridoViewModel
 
 @Composable
-fun StreamScreen(viewModel: BridoViewModel) {
+fun StreamScreen(viewModel: BridoViewModel, onDisconnect: () -> Unit = {}) {
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(BridoDark),
+            .background(BridoDark)
+            .windowInsetsPadding(WindowInsets.systemBars),
     ) {
         // ── Video Stream Viewer ──────────────────────────────────────────
         StreamViewer(
@@ -53,7 +57,7 @@ fun StreamScreen(viewModel: BridoViewModel) {
             isStreaming = viewModel.isStreaming,
             modifier = Modifier
                 .fillMaxWidth()
-                .weight(1f),
+                .weight(0.45f),
         )
 
         // ── Terminal Output Panel ────────────────────────────────────────
@@ -61,8 +65,8 @@ fun StreamScreen(viewModel: BridoViewModel) {
             lines = viewModel.terminalLines,
             modifier = Modifier
                 .fillMaxWidth()
-                .weight(1f)
-                .padding(horizontal = 12.dp, vertical = 8.dp),
+                .weight(0.55f)
+                .padding(horizontal = 8.dp, vertical = 4.dp),
         )
 
         // ── Analyse Button ───────────────────────────────────────────────
@@ -71,8 +75,9 @@ fun StreamScreen(viewModel: BridoViewModel) {
             enabled = !viewModel.isAnalysing && viewModel.isStreaming,
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 12.dp)
-                .height(52.dp),
+                .padding(horizontal = 12.dp)
+                .padding(top = 8.dp)
+                .height(48.dp),
             colors = ButtonDefaults.buttonColors(containerColor = BridoSurfaceVariant),
             shape = RoundedCornerShape(8.dp),
         ) {
@@ -91,6 +96,29 @@ fun StreamScreen(viewModel: BridoViewModel) {
                     fontFamily = FontFamily.Serif,
                 )
             }
+        }
+
+        // ── Disconnect Button ────────────────────────────────────────────
+        Button(
+            onClick = {
+                viewModel.disconnect()
+                onDisconnect()
+            },
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp)
+                .padding(top = 4.dp, bottom = 8.dp)
+                .height(48.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2D1B1B)),
+            shape = RoundedCornerShape(8.dp),
+        ) {
+            Text(
+                "diSConnecT",
+                color = Color(0xFFFF6B6B),
+                fontWeight = FontWeight.Bold,
+                fontSize = 18.sp,
+                fontFamily = FontFamily.Serif,
+            )
         }
     }
 }

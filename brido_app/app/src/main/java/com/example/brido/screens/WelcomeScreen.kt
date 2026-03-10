@@ -45,13 +45,13 @@ fun WelcomeScreen(onContinue: () -> Unit) {
     ) {
         Column(
             horizontalAlignment = Alignment.Start,
-            modifier = Modifier.padding(horizontal = 40.dp),
+            modifier = Modifier.padding(horizontal = 32.dp),
         ) {
             // "Hi," line
             Text(
                 text = "Hi,",
                 color = BridoTextSecondary,
-                fontSize = 36.sp,
+                fontSize = 56.sp,
                 fontWeight = FontWeight.Light,
                 fontFamily = FontFamily.Serif,
             )
@@ -59,19 +59,19 @@ fun WelcomeScreen(onContinue: () -> Unit) {
             // "WeLComE" line — mixed case styling
             Text(
                 text = buildAnnotatedString {
-                    withStyle(SpanStyle(fontWeight = FontWeight.Bold, fontSize = 52.sp)) {
+                    withStyle(SpanStyle(fontWeight = FontWeight.Bold, fontSize = 72.sp)) {
                         append("W")
                     }
-                    withStyle(SpanStyle(fontWeight = FontWeight.Light, fontSize = 44.sp)) {
+                    withStyle(SpanStyle(fontWeight = FontWeight.Light, fontSize = 60.sp)) {
                         append("e")
                     }
-                    withStyle(SpanStyle(fontWeight = FontWeight.Bold, fontSize = 52.sp)) {
+                    withStyle(SpanStyle(fontWeight = FontWeight.Bold, fontSize = 72.sp)) {
                         append("LC")
                     }
-                    withStyle(SpanStyle(fontWeight = FontWeight.Light, fontSize = 44.sp)) {
+                    withStyle(SpanStyle(fontWeight = FontWeight.Light, fontSize = 60.sp)) {
                         append("om")
                     }
-                    withStyle(SpanStyle(fontWeight = FontWeight.Bold, fontSize = 52.sp)) {
+                    withStyle(SpanStyle(fontWeight = FontWeight.Bold, fontSize = 72.sp)) {
                         append("E")
                     }
                 },
@@ -82,10 +82,10 @@ fun WelcomeScreen(onContinue: () -> Unit) {
             // "tO" line
             Text(
                 text = buildAnnotatedString {
-                    withStyle(SpanStyle(fontWeight = FontWeight.Light, fontSize = 44.sp)) {
+                    withStyle(SpanStyle(fontWeight = FontWeight.Light, fontSize = 80.sp)) {
                         append("t")
                     }
-                    withStyle(SpanStyle(fontWeight = FontWeight.Bold, fontSize = 52.sp)) {
+                    withStyle(SpanStyle(fontWeight = FontWeight.Bold, fontSize = 96.sp)) {
                         append("O")
                     }
                 },
@@ -97,7 +97,7 @@ fun WelcomeScreen(onContinue: () -> Unit) {
             Text(
                 text = "brido",
                 color = BridoTextPrimary,
-                fontSize = 64.sp,
+                fontSize = 96.sp,
                 fontWeight = FontWeight.Black,
                 fontFamily = FontFamily.Serif,
             )

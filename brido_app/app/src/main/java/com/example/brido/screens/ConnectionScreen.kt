@@ -4,8 +4,10 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -45,6 +47,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.systemBars
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
@@ -72,6 +78,7 @@ fun ConnectionScreen(
         modifier = Modifier
             .fillMaxSize()
             .background(BridoDark)
+            .windowInsetsPadding(WindowInsets.systemBars)
             .verticalScroll(rememberScrollState()),
     ) {
         // ── Tab Row ──────────────────────────────────────────────────────
@@ -87,7 +94,8 @@ fun ConnectionScreen(
             },
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 8.dp),
+                .padding(horizontal = 16.dp)
+                .clip(RoundedCornerShape(16.dp)),
         ) {
             Tab(
                 selected = selectedTab == 0,
@@ -308,18 +316,20 @@ private fun ManualEntryTab(
 @Composable
 private fun HardwareInfoPanel(info: ServerInfo) {
     Row(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(IntrinsicSize.Min),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         HardwareCard(
-            modifier = Modifier.weight(1f),
+            modifier = Modifier.weight(1f).fillMaxHeight(),
             icon = Icons.Default.Storage,
             label = "Storage",
             value = info.storage,
             detail = info.storageUsed,
         )
         HardwareCard(
-            modifier = Modifier.weight(1f),
+            modifier = Modifier.weight(1f).fillMaxHeight(),
             icon = Icons.Default.GraphicEq,
             label = "Graphics Card",
             value = info.gpu,
@@ -328,18 +338,20 @@ private fun HardwareInfoPanel(info: ServerInfo) {
     }
     Spacer(Modifier.height(8.dp))
     Row(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(IntrinsicSize.Min),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         HardwareCard(
-            modifier = Modifier.weight(1f),
+            modifier = Modifier.weight(1f).fillMaxHeight(),
             icon = Icons.Default.Memory,
             label = "Installed RAM",
             value = info.ram,
             detail = info.ramSpeed,
         )
         HardwareCard(
-            modifier = Modifier.weight(1f),
+            modifier = Modifier.weight(1f).fillMaxHeight(),
             icon = Icons.Default.Memory,
             label = "Processor",
             value = info.processor,
