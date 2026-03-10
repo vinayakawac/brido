@@ -1,0 +1,39 @@
+# ── Rust ─────────────────────────────────────────────────────────────────────
+brido_server/target/
+brido_server/**/*.rs.bk
+Cargo.lock
+
+# ── Android / Gradle ─────────────────────────────────────────────────────────
+brido_app/.gradle/
+brido_app/local.properties
+brido_app/build/
+brido_app/app/build/
+brido_app/**/*.apk
+brido_app/**/*.aab
+brido_app/**/*.ap_
+brido_app/**/*.dex
+brido_app/captures/
+
+# ── Android Studio / IntelliJ ────────────────────────────────────────────────
+.idea/
+*.iml
+*.ipr
+*.iws
+.navigation/
+*.hprof
+
+# ── OS ───────────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── Editor ───────────────────────────────────────────────────────────────────
+.vscode/
+*.swp
+*.swo
+*~
+
+# ── Docs (ignore all .md except README and models) ───────────────────────────
+*.md
+!README.md
+!models.md
