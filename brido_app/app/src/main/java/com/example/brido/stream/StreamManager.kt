@@ -2,6 +2,7 @@ package com.example.brido.stream
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import com.example.brido.network.RetrofitClient
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
@@ -16,6 +17,11 @@ class StreamManager(
     private val onDisconnected: (reason: String) -> Unit,
 ) {
     private val client = OkHttpClient.Builder()
+        .sslSocketFactory(
+            RetrofitClient.okHttpClient.sslSocketFactory,
+            RetrofitClient.trustManager
+        )
+        .hostnameVerifier { _, _ -> true }
         .readTimeout(0, TimeUnit.MILLISECONDS)
         .pingInterval(10, TimeUnit.SECONDS)
         .build()
@@ -29,7 +35,7 @@ class StreamManager(
     fun connect(serverIp: String, port: Int, token: String) {
         disconnect()
 
-        val url = "ws://$serverIp:$port/ws/stream?token=$token"
+        val url = "wss://$serverIp:$port/ws/stream?token=$token"
         val request = Request.Builder().url(url).build()
 
         webSocket = client.newWebSocket(request, object : WebSocketListener() {
