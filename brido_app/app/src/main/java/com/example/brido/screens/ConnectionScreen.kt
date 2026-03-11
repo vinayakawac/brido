@@ -1,5 +1,6 @@
 package com.example.brido.screens
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -18,6 +19,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.CheckBox
 import androidx.compose.material.icons.filled.CheckBoxOutlineBlank
 import androidx.compose.material.icons.filled.Memory
@@ -53,6 +55,7 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
@@ -70,6 +73,7 @@ import com.example.brido.viewmodel.BridoViewModel
 @Composable
 fun ConnectionScreen(
     viewModel: BridoViewModel,
+    onGoBack: () -> Unit = {},
     onConnected: () -> Unit,
 ) {
     var selectedTab by remember { mutableIntStateOf(1) } // default to Manual Entry
@@ -81,6 +85,28 @@ fun ConnectionScreen(
             .windowInsetsPadding(WindowInsets.systemBars)
             .verticalScroll(rememberScrollState()),
     ) {
+        // ── Back Bar ─────────────────────────────────────────────────────
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { onGoBack() }
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+        ) {
+            Icon(
+                Icons.AutoMirrored.Filled.ArrowBack,
+                contentDescription = "go back",
+                tint = BridoTextSecondary,
+                modifier = Modifier.size(18.dp),
+            )
+            Spacer(Modifier.width(6.dp))
+            Text(
+                "go baCk",
+                color = BridoTextSecondary,
+                fontSize = 14.sp,
+                fontFamily = FontFamily.Serif,
+            )
+        }
         // ── Tab Row ──────────────────────────────────────────────────────
         TabRow(
             selectedTabIndex = selectedTab,
@@ -279,27 +305,30 @@ private fun ManualEntryTab(
 
         Spacer(Modifier.height(16.dp))
 
-        // ── Connection Status ────────────────────────────────────────────
-        Box(
+        // ── sTReAmScrEEn Button ──────────────────────────────────────────
+        Button(
+            onClick = {
+                if (viewModel.isConnected) {
+                    onConnected()
+                } else if (!viewModel.isConnecting) {
+                    viewModel.connectionError = "Not connected. Enter IP and PIN above, then tap Connect."
+                }
+            },
             modifier = Modifier
                 .fillMaxWidth()
-                .background(BridoSurfaceVariant, RoundedCornerShape(8.dp))
-                .padding(vertical = 12.dp),
-            contentAlignment = Alignment.Center,
+                .padding(horizontal = 0.dp)
+                .height(50.dp),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = if (viewModel.isConnected) BridoSurfaceVariant else BridoSurfaceVariant.copy(alpha = 0.5f),
+            ),
+            shape = RoundedCornerShape(8.dp),
         ) {
             Text(
-                text = when {
-                    viewModel.isConnected -> "Connected"
-                    viewModel.isConnecting -> "Connecting..."
-                    viewModel.connectionError != null -> "Connection failed"
-                    else -> "connection status"
-                },
-                color = when {
-                    viewModel.isConnected -> Color(0xFF4CAF50)
-                    viewModel.connectionError != null -> Color.Red
-                    else -> BridoTextSecondary
-                },
-                fontWeight = FontWeight.Medium,
+                "sTReAmScrEEn",
+                color = if (viewModel.isConnected) BridoTextPrimary else BridoTextSecondary,
+                fontWeight = FontWeight.Bold,
+                fontSize = 18.sp,
+                fontFamily = FontFamily.Serif,
             )
         }
 

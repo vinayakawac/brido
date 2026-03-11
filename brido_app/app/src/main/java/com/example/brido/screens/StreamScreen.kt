@@ -1,6 +1,7 @@
 package com.example.brido.screens
 
 import android.graphics.Bitmap
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -34,6 +35,11 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.width
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material3.Icon
 import androidx.compose.ui.unit.sp
 import com.example.brido.ui.theme.BridoAccent
 import com.example.brido.ui.theme.BridoDark
@@ -44,13 +50,35 @@ import com.example.brido.ui.theme.BridoTextSecondary
 import com.example.brido.viewmodel.BridoViewModel
 
 @Composable
-fun StreamScreen(viewModel: BridoViewModel, onDisconnect: () -> Unit = {}) {
+fun StreamScreen(viewModel: BridoViewModel, onGoBack: () -> Unit = {}, onDisconnect: () -> Unit = {}) {
     Column(
         modifier = Modifier
             .fillMaxSize()
             .background(BridoDark)
             .windowInsetsPadding(WindowInsets.systemBars),
     ) {
+        // ── Back Bar ─────────────────────────────────────────────────────
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { onGoBack() }
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+        ) {
+            Icon(
+                Icons.AutoMirrored.Filled.ArrowBack,
+                contentDescription = "go back",
+                tint = BridoTextSecondary,
+                modifier = Modifier.size(18.dp),
+            )
+            Spacer(Modifier.width(6.dp))
+            Text(
+                "go baCk",
+                color = BridoTextSecondary,
+                fontSize = 14.sp,
+                fontFamily = FontFamily.Serif,
+            )
+        }
         // ── Video Stream Viewer ──────────────────────────────────────────
         StreamViewer(
             frame = viewModel.currentFrame,

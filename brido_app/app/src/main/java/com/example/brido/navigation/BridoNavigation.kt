@@ -28,9 +28,7 @@ fun BridoNavigation() {
         composable(Routes.WELCOME) {
             WelcomeScreen(
                 onContinue = {
-                    navController.navigate(Routes.CONNECTION) {
-                        popUpTo(Routes.WELCOME) { inclusive = true }
-                    }
+                    navController.navigate(Routes.CONNECTION)
                 },
             )
         }
@@ -38,10 +36,11 @@ fun BridoNavigation() {
         composable(Routes.CONNECTION) {
             ConnectionScreen(
                 viewModel = viewModel,
+                onGoBack = {
+                    navController.popBackStack()
+                },
                 onConnected = {
-                    navController.navigate(Routes.STREAM) {
-                        popUpTo(Routes.CONNECTION) { inclusive = true }
-                    }
+                    navController.navigate(Routes.STREAM)
                 },
             )
         }
@@ -49,7 +48,11 @@ fun BridoNavigation() {
         composable(Routes.STREAM) {
             StreamScreen(
                 viewModel = viewModel,
+                onGoBack = {
+                    navController.popBackStack()
+                },
                 onDisconnect = {
+                    viewModel.disconnect()
                     navController.navigate(Routes.CONNECTION) {
                         popUpTo(Routes.STREAM) { inclusive = true }
                     }
