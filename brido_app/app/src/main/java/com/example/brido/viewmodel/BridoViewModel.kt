@@ -124,7 +124,7 @@ class BridoViewModel : ViewModel() {
             try {
                 // Resize + compress the frame before sending — smaller image = much faster AI inference
                 val imageBase64 = withContext(Dispatchers.Default) {
-                    val maxWidth = 480
+                    val maxWidth = 1024
                     val scaled = if (frame.width > maxWidth) {
                         val scale = maxWidth.toFloat() / frame.width
                         Bitmap.createScaledBitmap(
@@ -135,7 +135,7 @@ class BridoViewModel : ViewModel() {
                         )
                     } else frame
                     val stream = ByteArrayOutputStream()
-                    scaled.compress(Bitmap.CompressFormat.JPEG, 65, stream)
+                    scaled.compress(Bitmap.CompressFormat.JPEG, 80, stream)
                     Base64.encodeToString(stream.toByteArray(), Base64.NO_WRAP)
                 }
 
