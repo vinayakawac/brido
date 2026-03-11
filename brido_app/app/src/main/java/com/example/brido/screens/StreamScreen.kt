@@ -231,96 +231,210 @@ private fun TerminalPanel(
                     .fillMaxSize()
                     .padding(12.dp),
             ) {
-                items(lines) { line ->
-                    Text(
-                        text = parseMarkdownLine(line),
-                        color = if (line.startsWith(">")) Color(0xFF4CAF50) else BridoTextPrimary,
-                        fontFamily = FontFamily.Monospace,
-                        fontSize = 13.sp,
-                        lineHeight = 18.sp,
-                    )
+                items(lines) { block ->
+                    if (block.startsWith(">")) {
+                        // Status lines (> analysing frame...) — green, plain
+                        Text(
+                            text = block,
+                            color = Color(0xFF4CAF50),
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 13.sp,
+                            lineHeight = 18.sp,
+                        )
+                    } else if (block.startsWith("[") && block.endsWith("]")) {
+                        // Model tag [model-name] — accent color
+                        Text(
+                            text = block,
+                            color = BridoAccent,
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                            lineHeight = 18.sp,
+                        )
+                    } else {
+                        // Full markdown response block
+                        Text(
+                            text = parseMarkdown(block),
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 13.sp,
+                            lineHeight = 18.sp,
+                        )
+                    }
                 }
             }
         }
     }
 }
 
-// ── Markdown line parser ────────────────────────────────────────────────────
-// Handles: **bold**, *italic*, `code`, ***bold italic***, headings (#), bullets (- )
-private fun parseMarkdownLine(line: String): AnnotatedString {
-    // Heading lines → bold + accent color
-    if (line.startsWith("# ") || line.startsWith("## ") || line.startsWith("### ")) {
-        val text = line.trimStart('#').trim()
-        return buildAnnotatedString {
-            withStyle(SpanStyle(fontWeight = FontWeight.Bold, color = Color(0xFF00E676))) {
-                append(text)
-            }
-        }
-    }
+// ── Full Markdown parser ─────────────────────────────────────────────────────
+// Handles: **bold**, *italic*, ***bold italic***, `code`, ~~strikethrough~~,
+//          # headings, - bullets, 1. numbered lists, --- hr, > blockquotes,
+//          ```code blocks```, and multiline spans.
 
-    // Bullet lines — render the dash then parse the rest
-    val bulletPrefix = when {
-        line.startsWith("- ") -> "• "
-        line.startsWith("  - ") -> "  • "
-        else -> null
-    }
+private val codeBlockFence = Regex("^```")
+private val headingPattern = Regex("^(#{1,6})\\s+(.*)")
+private val hrPattern = Regex("^(---+|\\*\\*\\*+|___+)\\s*$")
+private val bulletPattern = Regex("^(\\s*)[-*+]\\s+(.*)")
+private val numberedPattern = Regex("^(\\s*)(\\d+)\\.\\s+(.*)")
+private val blockquotePattern = Regex("^>\\s?(.*)")
+private val modelTagPattern = Regex("^\\[.+]$")
 
+private fun parseMarkdown(block: String): AnnotatedString {
+    val lines = block.lines()
     return buildAnnotatedString {
-        if (bulletPrefix != null) {
-            append(bulletPrefix)
-            appendMarkdownSpans(line.substringAfter("- "))
-        } else {
-            appendMarkdownSpans(line)
+        var i = 0
+        while (i < lines.size) {
+            val line = lines[i]
+
+            // ── Fenced code block ───────────────────────────────────
+
+            if (codeBlockFence.containsMatchIn(line)) {
+                i++ // skip opening ```
+                while (i < lines.size && !codeBlockFence.containsMatchIn(lines[i])) {
+                    withStyle(SpanStyle(color = Color(0xFF00E676), background = Color(0xFF1E1E1E))) {
+                        append(lines[i])
+                    }
+                    append("\n")
+                    i++
+                }
+                if (i < lines.size) i++ // skip closing ```
+                continue
+            }
+
+            // Add newline between blocks (not before first)
+            if (i > 0) append("\n")
+
+            // ── Horizontal rule ─────────────────────────────────────
+            if (hrPattern.matches(line)) {
+                withStyle(SpanStyle(color = BridoTextSecondary)) {
+                    append("────────────────────────")
+                }
+                i++
+                continue
+            }
+
+            // ── Model tag [model-name] ──────────────────────────────
+            if (modelTagPattern.matches(line)) {
+                withStyle(SpanStyle(fontWeight = FontWeight.Bold, color = BridoAccent)) {
+                    append(line)
+                }
+                i++
+                continue
+            }
+
+            // ── Heading ─────────────────────────────────────────────
+            val headingMatch = headingPattern.matchEntire(line)
+            if (headingMatch != null) {
+                val level = headingMatch.groupValues[1].length
+                val headText = headingMatch.groupValues[2]
+                val size = when (level) {
+                    1 -> 1.3f; 2 -> 1.15f; else -> 1.0f
+                }
+                withStyle(SpanStyle(
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF00E676),
+                    fontSize = (13 * size).sp,
+                )) {
+                    append(headText)
+                }
+                i++
+                continue
+            }
+
+            // ── Blockquote ──────────────────────────────────────────
+            val bqMatch = blockquotePattern.matchEntire(line)
+            if (bqMatch != null) {
+                withStyle(SpanStyle(color = Color(0xFF81C784))) {
+                    append("│ ")
+                    appendInlineMarkdown(bqMatch.groupValues[1])
+                }
+                i++
+                continue
+            }
+
+            // ── Bullet list ─────────────────────────────────────────
+            val bulletMatch = bulletPattern.matchEntire(line)
+            if (bulletMatch != null) {
+                val indent = bulletMatch.groupValues[1]
+                append(indent)
+                withStyle(SpanStyle(color = BridoAccent)) { append("• ") }
+                appendInlineMarkdown(bulletMatch.groupValues[2])
+                i++
+                continue
+            }
+
+            // ── Numbered list ───────────────────────────────────────
+            val numMatch = numberedPattern.matchEntire(line)
+            if (numMatch != null) {
+                val indent = numMatch.groupValues[1]
+                val num = numMatch.groupValues[2]
+                append(indent)
+                withStyle(SpanStyle(color = BridoAccent, fontWeight = FontWeight.Bold)) {
+                    append("$num. ")
+                }
+                appendInlineMarkdown(numMatch.groupValues[3])
+                i++
+                continue
+            }
+
+            // ── Normal paragraph — parse inline markdown ────────────
+            appendInlineMarkdown(line)
+            i++
         }
     }
 }
 
-private fun AnnotatedString.Builder.appendMarkdownSpans(text: String) {
-    // Regex matches:  ***bold italic***  |  **bold**  |  *italic*  |  `code`
-    val pattern = Regex("""\*\*\*(.+?)\*\*\*|\*\*(.+?)\*\*|\*(.+?)\*|`(.+?)`""")
+// Inline markdown: ***bold italic***, **bold**, *italic*, ~~strikethrough~~, `code`
+// DOT_MATCHES_ALL so spans can contain newlines within a single block
+private val inlinePattern = Regex(
+    """\*\*\*(.+?)\*\*\*""" +           // group 1: bold italic
+    """|\*\*(.+?)\*\*""" +               // group 2: bold
+    """|\*(.+?)\*""" +                    // group 3: italic
+    """|~~(.+?)~~""" +                    // group 4: strikethrough
+    """|`([^`]+)`""",                     // group 5: inline code
+    RegexOption.DOT_MATCHES_ALL,
+)
 
+private fun AnnotatedString.Builder.appendInlineMarkdown(text: String) {
     var cursor = 0
-    for (match in pattern.findAll(text)) {
-        // Append plain text before this match
+    for (match in inlinePattern.findAll(text)) {
         if (match.range.first > cursor) {
-            append(text.substring(cursor, match.range.first))
+            withStyle(SpanStyle(color = BridoTextPrimary)) {
+                append(text.substring(cursor, match.range.first))
+            }
         }
-
         when {
-            // ***bold italic***
             match.groupValues[1].isNotEmpty() -> {
-                withStyle(SpanStyle(fontWeight = FontWeight.Bold, fontStyle = FontStyle.Italic)) {
+                withStyle(SpanStyle(fontWeight = FontWeight.Bold, fontStyle = FontStyle.Italic, color = BridoTextPrimary)) {
                     append(match.groupValues[1])
                 }
             }
-            // **bold**
             match.groupValues[2].isNotEmpty() -> {
-                withStyle(SpanStyle(fontWeight = FontWeight.Bold)) {
+                withStyle(SpanStyle(fontWeight = FontWeight.Bold, color = Color(0xFFE0E0E0))) {
                     append(match.groupValues[2])
                 }
             }
-            // *italic*
             match.groupValues[3].isNotEmpty() -> {
-                withStyle(SpanStyle(fontStyle = FontStyle.Italic)) {
+                withStyle(SpanStyle(fontStyle = FontStyle.Italic, color = BridoTextPrimary)) {
                     append(match.groupValues[3])
                 }
             }
-            // `code`
             match.groupValues[4].isNotEmpty() -> {
-                withStyle(SpanStyle(
-                    color = Color(0xFF00E676),
-                    background = Color(0xFF2A2A2A),
-                )) {
+                withStyle(SpanStyle(textDecoration = TextDecoration.LineThrough, color = BridoTextSecondary)) {
                     append(match.groupValues[4])
                 }
             }
+            match.groupValues[5].isNotEmpty() -> {
+                withStyle(SpanStyle(color = Color(0xFF00E676), background = Color(0xFF2A2A2A))) {
+                    append(match.groupValues[5])
+                }
+            }
         }
-
         cursor = match.range.last + 1
     }
-
-    // Append remaining plain text
     if (cursor < text.length) {
-        append(text.substring(cursor))
+        withStyle(SpanStyle(color = BridoTextPrimary)) {
+            append(text.substring(cursor))
+        }
     }
 }

@@ -150,11 +150,8 @@ class BridoViewModel : ViewModel() {
                     )
                 }
 
-                // Parse and display the result line by line
-                terminalLines.add("> model: ${response.modelUsed}")
-                response.result.lines().forEach { line ->
-                    terminalLines.add(line)
-                }
+                // Add full response as one block (server prefixes with [model-name])
+                terminalLines.add(response.result.trim())
                 terminalLines.add("")
             } catch (e: Exception) {
                 terminalLines.add("> error: ${e.message}")
