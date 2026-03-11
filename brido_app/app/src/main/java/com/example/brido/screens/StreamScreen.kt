@@ -33,7 +33,13 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.width
@@ -227,7 +233,7 @@ private fun TerminalPanel(
             ) {
                 items(lines) { line ->
                     Text(
-                        text = line,
+                        text = parseMarkdownLine(line),
                         color = if (line.startsWith(">")) Color(0xFF4CAF50) else BridoTextPrimary,
                         fontFamily = FontFamily.Monospace,
                         fontSize = 13.sp,
@@ -236,5 +242,85 @@ private fun TerminalPanel(
                 }
             }
         }
+    }
+}
+
+// ── Markdown line parser ────────────────────────────────────────────────────
+// Handles: **bold**, *italic*, `code`, ***bold italic***, headings (#), bullets (- )
+private fun parseMarkdownLine(line: String): AnnotatedString {
+    // Heading lines → bold + accent color
+    if (line.startsWith("# ") || line.startsWith("## ") || line.startsWith("### ")) {
+        val text = line.trimStart('#').trim()
+        return buildAnnotatedString {
+            withStyle(SpanStyle(fontWeight = FontWeight.Bold, color = Color(0xFF00E676))) {
+                append(text)
+            }
+        }
+    }
+
+    // Bullet lines — render the dash then parse the rest
+    val bulletPrefix = when {
+        line.startsWith("- ") -> "• "
+        line.startsWith("  - ") -> "  • "
+        else -> null
+    }
+
+    return buildAnnotatedString {
+        if (bulletPrefix != null) {
+            append(bulletPrefix)
+            appendMarkdownSpans(line.substringAfter("- "))
+        } else {
+            appendMarkdownSpans(line)
+        }
+    }
+}
+
+private fun AnnotatedString.Builder.appendMarkdownSpans(text: String) {
+    // Regex matches:  ***bold italic***  |  **bold**  |  *italic*  |  `code`
+    val pattern = Regex("""\*\*\*(.+?)\*\*\*|\*\*(.+?)\*\*|\*(.+?)\*|`(.+?)`""")
+
+    var cursor = 0
+    for (match in pattern.findAll(text)) {
+        // Append plain text before this match
+        if (match.range.first > cursor) {
+            append(text.substring(cursor, match.range.first))
+        }
+
+        when {
+            // ***bold italic***
+            match.groupValues[1].isNotEmpty() -> {
+                withStyle(SpanStyle(fontWeight = FontWeight.Bold, fontStyle = FontStyle.Italic)) {
+                    append(match.groupValues[1])
+                }
+            }
+            // **bold**
+            match.groupValues[2].isNotEmpty() -> {
+                withStyle(SpanStyle(fontWeight = FontWeight.Bold)) {
+                    append(match.groupValues[2])
+                }
+            }
+            // *italic*
+            match.groupValues[3].isNotEmpty() -> {
+                withStyle(SpanStyle(fontStyle = FontStyle.Italic)) {
+                    append(match.groupValues[3])
+                }
+            }
+            // `code`
+            match.groupValues[4].isNotEmpty() -> {
+                withStyle(SpanStyle(
+                    color = Color(0xFF00E676),
+                    background = Color(0xFF2A2A2A),
+                )) {
+                    append(match.groupValues[4])
+                }
+            }
+        }
+
+        cursor = match.range.last + 1
+    }
+
+    // Append remaining plain text
+    if (cursor < text.length) {
+        append(text.substring(cursor))
     }
 }
