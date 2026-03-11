@@ -43,7 +43,7 @@ class BridoViewModel : ViewModel() {
         private set
     var isAnalysing by mutableStateOf(false)
         private set
-    var selectedModel by mutableStateOf("qwen3-vl:8b")
+    var selectedModel by mutableStateOf("gemma3:4b")
 
     // ── Internal ─────────────────────────────────────────────────────────
     private var apiService: BridoApiService? = null
@@ -122,10 +122,20 @@ class BridoViewModel : ViewModel() {
             terminalLines.add("> analysing frame...")
 
             try {
-                // Compress the current frame to JPEG on a background thread
+                // Resize + compress the frame before sending — smaller image = much faster AI inference
                 val imageBase64 = withContext(Dispatchers.Default) {
+                    val maxWidth = 480
+                    val scaled = if (frame.width > maxWidth) {
+                        val scale = maxWidth.toFloat() / frame.width
+                        Bitmap.createScaledBitmap(
+                            frame,
+                            maxWidth,
+                            (frame.height * scale).toInt(),
+                            true,
+                        )
+                    } else frame
                     val stream = ByteArrayOutputStream()
-                    frame.compress(Bitmap.CompressFormat.JPEG, 85, stream)
+                    scaled.compress(Bitmap.CompressFormat.JPEG, 65, stream)
                     Base64.encodeToString(stream.toByteArray(), Base64.NO_WRAP)
                 }
 

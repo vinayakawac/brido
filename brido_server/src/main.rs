@@ -183,7 +183,6 @@ fn main() {
 
     // Flags shared between UI and server lifecycle
     let shutdown_flag = Arc::new(AtomicBool::new(false));
-    let restart_flag = Arc::new(AtomicBool::new(false));
     let server_ready = Arc::new(AtomicBool::new(false));
     let connected_count = Arc::new(AtomicUsize::new(0));
 
@@ -196,7 +195,6 @@ fn main() {
         pin,
         port,
         shutdown_flag.clone(),
-        restart_flag.clone(),
         server_ready.clone(),
         connected_count,
         axum_handle,

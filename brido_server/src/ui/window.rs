@@ -56,7 +56,6 @@ pub struct BridoApp {
     qr_texture: Option<TextureHandle>,
     qr_payload: String,
     shutdown_flag: Arc<AtomicBool>,
-    restart_flag: Arc<AtomicBool>,
     server_ready: Arc<AtomicBool>,
     connected_count: Arc<AtomicUsize>,
     axum_handle: axum_server::Handle,
@@ -68,7 +67,6 @@ impl BridoApp {
         pin: String,
         port: u16,
         shutdown_flag: Arc<AtomicBool>,
-        restart_flag: Arc<AtomicBool>,
         server_ready: Arc<AtomicBool>,
         connected_count: Arc<AtomicUsize>,
         axum_handle: axum_server::Handle,
@@ -84,20 +82,10 @@ impl BridoApp {
             qr_texture: None,
             qr_payload,
             shutdown_flag,
-            restart_flag,
             server_ready,
             connected_count,
             axum_handle,
         }
-    }
-
-    /// Regenerate QR code (after restart with new PIN / IP).
-    pub fn refresh_qr(&mut self, ip: String, pin: String) {
-        self.ip = ip;
-        self.pin = pin;
-        self.qr_payload = format!("brido://{}:{}:{}", self.ip, self.port, self.pin);
-        self.qr_texture = None; // will be re-created next frame
-        self.header.reset();
     }
 
     fn handle_action(&mut self, action: ControlAction, ctx: &egui::Context) {
