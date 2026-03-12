@@ -81,23 +81,71 @@ impl<'a> ModelManager<'a> {
         _model: &str,
         custom_prompt: Option<&str>,
     ) -> Result<String> {
-        // Try primary vision model, then fallback
-        let models = ["qwen3-vl:8b", "gemma3:4b"];
+        // Step 1: vision model reads the screen
+        let vision_text: String = match self.run_vision(image_base64, "qwen3-vl:4b", custom_prompt).await {
+            Ok(t) if !t.trim().is_empty() => t,
+            _ => self.run_vision(image_base64, "gemma3:4b", custom_prompt).await
+                    .map_err(|e| anyhow!("All vision models failed: {}", e))?,
+        };
 
-        for model in models {
-            let result = self.run_vision(image_base64, model, custom_prompt).await;
-            match result {
-                Ok(text) if !text.trim().is_empty() => {
-                    tracing::info!("Got response from {}", model);
-                    let clean = strip_think_tags(&text);
-                    return Ok(format!("[{}]\n{}", model, clean));
+        if vision_text.trim().is_empty() {
+            return Err(anyhow!("Vision model returned empty"));
+        }
+
+        let clean_vision = strip_think_tags(&vision_text);
+
+        // Step 2: if it looks like code/algorithm/reasoning, send to DeepSeek
+        let needs_reasoning = looks_like_reasoning(&clean_vision);
+
+        if needs_reasoning {
+            let reasoning_result = self.run_reasoning(&clean_vision).await;
+            match reasoning_result {
+                Ok(r) if !r.trim().is_empty() => {
+                    let clean = strip_think_tags(&r);
+                    return Ok(format!("[qwen3-vl:4b + deepseek-r1:8b]\n{}", clean));
                 }
-                Ok(_) => tracing::warn!("{} returned empty, trying next", model),
-                Err(e) => tracing::warn!("{} failed: {}, trying next", model, e),
+                _ => {} // fall through to vision-only result
             }
         }
 
-        Err(anyhow!("All models failed"))
+        Ok(format!("[qwen3-vl:4b]\n{}", clean_vision))
+    }
+
+    async fn run_reasoning(&self, extracted_text: &str) -> Result<String> {
+        let prompt = format!(
+            "Solve this problem concisely:\n\n{}\n\nAnswer directly with solution and brief explanation.",
+            extracted_text
+        );
+
+        let request = ChatRequest {
+            model: "deepseek-r1:8b".to_string(),
+            messages: vec![
+                ChatMessage {
+                    role: "user".to_string(),
+                    content: prompt,
+                    images: None,
+                },
+            ],
+            stream: false,
+            options: Some(ChatOptions {
+                num_predict: 512,
+                num_ctx: 4096,
+                temperature: 0.1,
+            }),
+            keep_alive: Some("5m".to_string()),
+        };
+
+        let response = self
+            .client
+            .post(format!("{}/api/chat", self.ollama_url))
+            .json(&request)
+            .send()
+            .await?
+            .error_for_status()?
+            .json::<ChatResponse>()
+            .await?;
+
+        Ok(response.message.content)
     }
 
     async fn run_vision(
@@ -144,6 +192,16 @@ impl<'a> ModelManager<'a> {
 
         Ok(response.message.content)
     }
+}
+
+fn looks_like_reasoning(text: &str) -> bool {
+    let lower = text.to_lowercase();
+    let triggers = [
+        "complexity", "algorithm", "function", "code", "program",
+        "output", "implement", "recursion", "loop", "array",
+        "prove", "derive", "calculate", "equation", "solve",
+    ];
+    triggers.iter().filter(|&&t| lower.contains(t)).count() >= 2
 }
 
 fn strip_think_tags(text: &str) -> String {

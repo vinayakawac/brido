@@ -213,22 +213,22 @@ fn detect_gpu() -> String {
 fn get_supported_models() -> Vec<ModelInfo> {
     vec![
         ModelInfo {
-            name: "qwen/qwen3-vl-8b".to_string(),
-            file: "qwen3-VL-8B-Instruct-Q4_K_M.gguf".to_string(),
-            capability: "vision, tool use".to_string(),
-            size_gb: 6.19,
+            name: "qwen3-vl:4b".to_string(),
+            file: "qwen3-vl:4b".to_string(),
+            capability: "vision, screen analysis".to_string(),
+            size_gb: 3.3,
         },
         ModelInfo {
-            name: "google/gemma-3-4b".to_string(),
-            file: "gemma-3-4b-it-Q4_K_M.gguf".to_string(),
-            capability: "vision".to_string(),
-            size_gb: 3.34,
+            name: "gemma3:4b".to_string(),
+            file: "gemma3:4b".to_string(),
+            capability: "vision, fallback".to_string(),
+            size_gb: 3.3,
         },
         ModelInfo {
-            name: "deepseek/deepseek-r1-0528-qwen3-8b".to_string(),
-            file: "deepseek-r1-0528-qwen3-8b-Q4_K_M.gguf".to_string(),
-            capability: "reasoning".to_string(),
-            size_gb: 5.03,
+            name: "deepseek-r1:8b".to_string(),
+            file: "deepseek-r1:8b".to_string(),
+            capability: "reasoning, code, algorithms".to_string(),
+            size_gb: 5.2,
         },
     ]
 }
