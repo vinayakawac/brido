@@ -43,32 +43,32 @@ struct ResponseMessage {
 }
 
 const SYSTEM_PROMPT: &str = "\
-You are a smart assistant that reads laptop screenshots and responds helpfully.
+You are an expert assistant answering questions visible on a laptop screenshot.
 
-RULES:
-1. If you see a QUIZ or MCQ question with options (A/B/C/D): pick the CORRECT answer. Format:
-   Answer: B. Stack
-   Explanation: Stacks follow LIFO — the last element pushed is the first popped.
+WHEN YOU SEE MCQ / QUIZ QUESTIONS:
+- There may be multiple numbered questions. Answer ALL of them.
+- Use your own knowledge to pick the CORRECT answer — do NOT guess from the image alone.
+- Output one line per question in this exact format:
+  1. B. Queue
+  2. C. O(log n)
+  3. B. HTML
+- No explanations unless there is only one question.
 
-2. If you see a CODING PROBLEM or code to write: write the solution code. Format:
-   ```python
-   def solution():
-       pass
-   ```
-   Explanation: Brief description of approach.
+WHEN YOU SEE A CODING PROBLEM:
+- Write the solution code.
+- Add a one-line explanation of the approach.
 
-3. If you see a MATH PROBLEM: solve it. Format:
-   Answer: 42
-   Steps: 1. First step  2. Second step
+WHEN YOU SEE A MATH PROBLEM:
+- Solve it. Show the answer and brief steps.
 
-4. For ANYTHING ELSE: write a short 2-3 sentence description of what's on screen.
+ANYTHING ELSE:
+- Write 2-3 sentences describing what's on screen.
 
-CRITICAL:
-- READ the text in the image carefully before answering
-- Give the CORRECT answer, not just any answer
-- Do NOT describe the screen layout or UI elements
-- Do NOT say what you see — just answer/solve what's asked
-- Keep responses SHORT and DIRECT";
+CRITICAL RULES:
+- ALWAYS use your knowledge to verify the correct answer — never pick an option just because it appears first.
+- READ every option carefully before deciding.
+- Do NOT describe UI, windows, or layout.
+- Keep responses SHORT and DIRECT.";
 
 impl<'a> ModelManager<'a> {
     pub fn new(ollama_url: &'a str, client: &'a reqwest::Client) -> Self {
@@ -82,11 +82,9 @@ impl<'a> ModelManager<'a> {
         custom_prompt: Option<&str>,
     ) -> Result<String> {
         // Step 1: vision model reads the screen
-        let vision_text: String = match self.run_vision(image_base64, "qwen3-vl:4b", custom_prompt).await {
-            Ok(t) if !t.trim().is_empty() => t,
-            _ => self.run_vision(image_base64, "gemma3:4b", custom_prompt).await
-                    .map_err(|e| anyhow!("All vision models failed: {}", e))?,
-        };
+        let vision_text: String = self.run_vision(image_base64, "qwen3-vl:4b", custom_prompt)
+            .await
+            .map_err(|e| anyhow!("Vision model failed: {}", e))?;
 
         if vision_text.trim().is_empty() {
             return Err(anyhow!("Vision model returned empty"));
@@ -154,27 +152,26 @@ impl<'a> ModelManager<'a> {
         model: &str,
         custom_prompt: Option<&str>,
     ) -> Result<String> {
-        let user_msg = custom_prompt
-            .unwrap_or("Read this screenshot carefully and respond according to your instructions.");
+        // Fold system instructions into the user message — qwen3-vl does not
+        // support a separate "system" role in Ollama's chat API.
+        let user_content = match custom_prompt {
+            Some(p) => format!("{}", p),
+            None => format!("{}", SYSTEM_PROMPT),
+        };
 
         let request = ChatRequest {
             model: model.to_string(),
             messages: vec![
                 ChatMessage {
-                    role: "system".to_string(),
-                    content: SYSTEM_PROMPT.to_string(),
-                    images: None,
-                },
-                ChatMessage {
                     role: "user".to_string(),
-                    content: user_msg.to_string(),
+                    content: user_content,
                     images: Some(vec![image_base64.to_string()]),
                 },
             ],
             stream: false,
             options: Some(ChatOptions {
                 num_predict: 512,
-                num_ctx: 4096,
+                num_ctx: 8192,
                 temperature: 0.1,
             }),
             keep_alive: Some("5m".to_string()),

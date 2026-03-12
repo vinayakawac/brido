@@ -129,7 +129,7 @@ pub async fn handle_analyse(
         .analyse_image(&req.image_base64, &model, req.prompt.as_deref())
         .await
         .map_err(|e| {
-            tracing::error!("Analysis failed: {}", e);
+            tracing::error!("Analysis failed (model={}): {:?}", model, e);
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
 
@@ -219,16 +219,10 @@ fn get_supported_models() -> Vec<ModelInfo> {
             size_gb: 3.3,
         },
         ModelInfo {
-            name: "gemma3:4b".to_string(),
-            file: "gemma3:4b".to_string(),
-            capability: "vision, fallback".to_string(),
-            size_gb: 3.3,
-        },
-        ModelInfo {
             name: "deepseek-r1:8b".to_string(),
             file: "deepseek-r1:8b".to_string(),
             capability: "reasoning, code, algorithms".to_string(),
-            size_gb: 5.2,
+            size_gb: 5.0,
         },
     ]
 }
