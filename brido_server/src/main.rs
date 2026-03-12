@@ -26,6 +26,19 @@ use config::Config;
 use encoder::FrameEncoder;
 use ui::window::BridoApp;
 
+fn load_icon() -> egui::IconData {
+    let png_bytes = include_bytes!("../../brido.png");
+    let img = image::load_from_memory(png_bytes)
+        .expect("brido.png not found")
+        .into_rgba8();
+    let (width, height) = img.dimensions();
+    egui::IconData {
+        rgba: img.into_raw(),
+        width,
+        height,
+    }
+}
+
 pub struct AppState {
     pub config: Config,
     pub frame_tx: broadcast::Sender<Vec<u8>>,
@@ -205,7 +218,8 @@ fn main() {
             .with_inner_size([400.0, 600.0])
             .with_min_inner_size([360.0, 520.0])
             .with_title("Brido Server")
-            .with_decorations(true),
+            .with_decorations(true)
+            .with_icon(std::sync::Arc::new(load_icon())),
         ..Default::default()
     };
 
