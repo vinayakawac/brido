@@ -43,7 +43,7 @@ class BridoViewModel : ViewModel() {
         private set
     var isAnalysing by mutableStateOf(false)
         private set
-    var selectedModel by mutableStateOf("gemma3:4b")
+    var selectedModel by mutableStateOf("qwen3-vl:4b")
 
     // ── Internal ─────────────────────────────────────────────────────────
     private var apiService: BridoApiService? = null
@@ -117,14 +117,14 @@ class BridoViewModel : ViewModel() {
         val frame = streamManager?.latestFrame ?: currentFrame
         if (frame == null || isAnalysing) return
 
+        // Set immediately to avoid double-tap races creating overlapping requests.
+        isAnalysing = true
+
         viewModelScope.launch {
-            isAnalysing = true
             terminalLines.add("> analysing frame...")
 
             try {
-                // Resize + compress the frame before sending — smaller image = much faster AI inference
-                val imageBase64 = withContext(Dispatchers.Default) {
-                    val maxWidth = 1024
+                suspend fun encodeFrame(maxWidth: Int, quality: Int): String = withContext(Dispatchers.Default) {
                     val scaled = if (frame.width > maxWidth) {
                         val scale = maxWidth.toFloat() / frame.width
                         Bitmap.createScaledBitmap(
@@ -135,12 +135,14 @@ class BridoViewModel : ViewModel() {
                         )
                     } else frame
                     val stream = ByteArrayOutputStream()
-                    scaled.compress(Bitmap.CompressFormat.JPEG, 80, stream)
+                    scaled.compress(Bitmap.CompressFormat.JPEG, quality, stream)
                     Base64.encodeToString(stream.toByteArray(), Base64.NO_WRAP)
                 }
 
                 val service = apiService ?: return@launch
-                val response = withContext(Dispatchers.IO) {
+
+                suspend fun runAnalyse(maxWidth: Int, quality: Int) = withContext(Dispatchers.IO) {
+                    val imageBase64 = encodeFrame(maxWidth, quality)
                     service.analyse(
                         token = "Bearer $token",
                         request = AnalyseRequest(
@@ -148,6 +150,17 @@ class BridoViewModel : ViewModel() {
                             model = selectedModel,
                         ),
                     )
+                }
+
+                val response = try {
+                    runAnalyse(1024, 80)
+                } catch (e: retrofit2.HttpException) {
+                    if (e.code() >= 500) {
+                        terminalLines.add("> retrying with smaller frame...")
+                        runAnalyse(768, 65)
+                    } else {
+                        throw e
+                    }
                 }
 
                 // Add full response as one block (server prefixes with [model-name])

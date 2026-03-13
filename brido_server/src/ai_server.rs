@@ -116,8 +116,16 @@ pub async fn handle_analyse(
     headers: HeaderMap,
     State(state): State<Arc<AppState>>,
     Json(req): Json<AnalyseRequest>,
-) -> Result<Json<AnalyseResponse>, StatusCode> {
-    verify_token(&headers, &state).await?;
+) -> Result<Json<AnalyseResponse>, (StatusCode, String)> {
+    verify_token(&headers, &state)
+        .await
+        .map_err(|s| (s, "Unauthorized".to_string()))?;
+
+    let _permit = state
+        .analysis_gate
+        .acquire()
+        .await
+        .map_err(|_| (StatusCode::SERVICE_UNAVAILABLE, "Analysis queue unavailable".to_string()))?;
 
     let model = req
         .model
@@ -136,11 +144,16 @@ pub async fn handle_analyse(
                 || msg.contains("invalid format")
                 || msg.contains("invalid checksum")
             {
-                StatusCode::BAD_REQUEST
+                (StatusCode::BAD_REQUEST, msg)
+            } else if msg.contains("requires more system memory")
+                || msg.contains("out of memory")
+                || msg.contains("insufficient memory")
+            {
+                (StatusCode::SERVICE_UNAVAILABLE, msg)
             } else if msg.contains("Connection refused") || msg.contains("timed out") {
-                StatusCode::BAD_GATEWAY
+                (StatusCode::BAD_GATEWAY, msg)
             } else {
-                StatusCode::INTERNAL_SERVER_ERROR
+                (StatusCode::INTERNAL_SERVER_ERROR, msg)
             }
         })?;
 

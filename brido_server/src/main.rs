@@ -18,7 +18,7 @@ use axum::{
     routing::{get, post},
     Router,
 };
-use tokio::sync::{broadcast, RwLock};
+use tokio::sync::{broadcast, RwLock, Semaphore};
 use tower_http::cors::CorsLayer;
 
 use capture::ScreenCapture;
@@ -44,6 +44,7 @@ pub struct AppState {
     pub frame_tx: broadcast::Sender<Vec<u8>>,
     pub active_tokens: RwLock<HashSet<String>>,
     pub http_client: reqwest::Client,
+    pub analysis_gate: Semaphore,
     pub connected_count: Arc<AtomicUsize>,
     /// Keeps one receiver alive so the capture thread doesn't exit when no WebSocket clients are connected.
     _keep_alive_rx: broadcast::Receiver<Vec<u8>>,
@@ -124,6 +125,7 @@ pub fn start_server(
                 frame_tx,
                 active_tokens: RwLock::new(HashSet::new()),
                 http_client: reqwest::Client::new(),
+                analysis_gate: Semaphore::new(1),
                 connected_count: connected_count_clone,
                 _keep_alive_rx: keep_alive_rx,
             });
