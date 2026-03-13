@@ -1,5 +1,6 @@
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
+use std::time::Duration;
 
 pub struct ModelManager<'a> {
     ollama_url: &'a str,
@@ -97,8 +98,8 @@ impl<'a> ModelManager<'a> {
 
         let clean_vision = strip_think_tags(&vision_text);
 
-        // Step 2: if it looks like code/algorithm/reasoning, send to DeepSeek
-        let needs_reasoning = looks_like_reasoning(&clean_vision);
+        // Step 2: route difficult content to DeepSeek for stronger reasoning.
+        let needs_reasoning = looks_like_reasoning(&clean_vision) || looks_like_question(&clean_vision);
 
         if needs_reasoning {
             let reasoning_result = self.run_reasoning(&clean_vision).await;
@@ -187,22 +188,44 @@ impl<'a> ModelManager<'a> {
             keep_alive: Some("5m".to_string()),
         };
 
-        let response = self
-            .client
-            .post(format!("{}/api/chat", self.ollama_url))
-            .json(&request)
-            .send()
-            .await?;
+        let mut last_error = String::new();
 
-        if !response.status().is_success() {
-            let status = response.status();
-            let body = response.text().await.unwrap_or_default();
-            return Err(anyhow!("Ollama vision error {}: {}", status, body));
+        for attempt in 1..=3 {
+            let response = self
+                .client
+                .post(format!("{}/api/chat", self.ollama_url))
+                .json(&request)
+                .send()
+                .await;
+
+            match response {
+                Ok(resp) => {
+                    if resp.status().is_success() {
+                        let parsed = resp.json::<ChatResponse>().await;
+                        match parsed {
+                            Ok(body) => return Ok(body.message.content),
+                            Err(e) => {
+                                last_error = format!("Failed to parse Ollama response: {}", e);
+                            }
+                        }
+                    } else {
+                        let status = resp.status();
+                        let body = resp.text().await.unwrap_or_default();
+                        last_error = format!("Ollama vision error {}: {}", status, body);
+                    }
+                }
+                Err(e) => {
+                    last_error = format!("Ollama request failed: {}", e);
+                }
+            }
+
+            if attempt < 3 {
+                tracing::warn!("Vision attempt {} failed, retrying: {}", attempt, last_error);
+                tokio::time::sleep(Duration::from_millis(250 * attempt as u64)).await;
+            }
         }
 
-        let response = response.json::<ChatResponse>().await?;
-
-        Ok(response.message.content)
+        Err(anyhow!(last_error))
     }
 }
 
@@ -214,6 +237,23 @@ fn looks_like_reasoning(text: &str) -> bool {
         "prove", "derive", "calculate", "equation", "solve",
     ];
     triggers.iter().filter(|&&t| lower.contains(t)).count() >= 2
+}
+
+fn looks_like_question(text: &str) -> bool {
+    let lower = text.to_lowercase();
+    let markers = [
+        "which",
+        "what",
+        "select",
+        "choose",
+        "correct",
+        "options",
+        "question",
+        "mcq",
+        "true or false",
+    ];
+
+    lower.contains('?') || markers.iter().any(|m| lower.contains(m))
 }
 
 fn normalize_image_base64(input: &str) -> String {

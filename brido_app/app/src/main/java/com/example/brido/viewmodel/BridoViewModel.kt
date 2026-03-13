@@ -154,7 +154,19 @@ class BridoViewModel : ViewModel() {
                 terminalLines.add(response.result.trim())
                 terminalLines.add("")
             } catch (e: Exception) {
-                terminalLines.add("> error: ${e.message}")
+                val errorText = when (e) {
+                    is retrofit2.HttpException -> {
+                        val body = e.response()?.errorBody()?.string()?.trim().orEmpty()
+                        if (body.isNotBlank()) {
+                            "HTTP ${e.code()}: $body"
+                        } else {
+                            "HTTP ${e.code()}"
+                        }
+                    }
+                    else -> e.message ?: "Unknown error"
+                }
+
+                terminalLines.add("> error: $errorText")
             } finally {
                 isAnalysing = false
             }
