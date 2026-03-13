@@ -81,8 +81,13 @@ impl<'a> ModelManager<'a> {
         _model: &str,
         custom_prompt: Option<&str>,
     ) -> Result<String> {
+        let image_base64 = normalize_image_base64(image_base64);
+        if image_base64.is_empty() {
+            return Err(anyhow!("Image payload is empty"));
+        }
+
         // Step 1: vision model reads the screen
-        let vision_text: String = self.run_vision(image_base64, "qwen3-vl:4b", custom_prompt)
+        let vision_text: String = self.run_vision(&image_base64, "qwen3-vl:4b", custom_prompt)
             .await
             .map_err(|e| anyhow!("Vision model failed: {}", e))?;
 
@@ -138,10 +143,15 @@ impl<'a> ModelManager<'a> {
             .post(format!("{}/api/chat", self.ollama_url))
             .json(&request)
             .send()
-            .await?
-            .error_for_status()?
-            .json::<ChatResponse>()
             .await?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            return Err(anyhow!("Ollama reasoning error {}: {}", status, body));
+        }
+
+        let response = response.json::<ChatResponse>().await?;
 
         Ok(response.message.content)
     }
@@ -182,10 +192,15 @@ impl<'a> ModelManager<'a> {
             .post(format!("{}/api/chat", self.ollama_url))
             .json(&request)
             .send()
-            .await?
-            .error_for_status()?
-            .json::<ChatResponse>()
             .await?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            return Err(anyhow!("Ollama vision error {}: {}", status, body));
+        }
+
+        let response = response.json::<ChatResponse>().await?;
 
         Ok(response.message.content)
     }
@@ -199,6 +214,24 @@ fn looks_like_reasoning(text: &str) -> bool {
         "prove", "derive", "calculate", "equation", "solve",
     ];
     triggers.iter().filter(|&&t| lower.contains(t)).count() >= 2
+}
+
+fn normalize_image_base64(input: &str) -> String {
+    let trimmed = input.trim();
+
+    let no_data_uri = if trimmed.starts_with("data:image") {
+        trimmed
+            .split_once(',')
+            .map(|(_, b64)| b64)
+            .unwrap_or("")
+    } else {
+        trimmed
+    };
+
+    no_data_uri
+        .chars()
+        .filter(|c| !c.is_whitespace())
+        .collect()
 }
 
 fn strip_think_tags(text: &str) -> String {

@@ -129,8 +129,19 @@ pub async fn handle_analyse(
         .analyse_image(&req.image_base64, &model, req.prompt.as_deref())
         .await
         .map_err(|e| {
-            tracing::error!("Analysis failed (model={}): {:?}", model, e);
-            StatusCode::INTERNAL_SERVER_ERROR
+            let msg = format!("{e:#}");
+            tracing::error!("Analysis failed (model={}): {}", model, msg);
+
+            if msg.contains("Image payload is empty")
+                || msg.contains("invalid format")
+                || msg.contains("invalid checksum")
+            {
+                StatusCode::BAD_REQUEST
+            } else if msg.contains("Connection refused") || msg.contains("timed out") {
+                StatusCode::BAD_GATEWAY
+            } else {
+                StatusCode::INTERNAL_SERVER_ERROR
+            }
         })?;
 
     Ok(Json(AnalyseResponse {

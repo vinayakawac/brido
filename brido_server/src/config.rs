@@ -23,7 +23,7 @@ impl Default for Config {
             target_width: 1280,
             target_height: 720,
             ollama_url: "http://localhost:11434".to_string(),
-            default_vision_model: "gemma3:4b".to_string(),
+            default_vision_model: "qwen3-vl:4b".to_string(),
             default_reasoning_model: "deepseek-r1:8b".to_string(),
         }
     }
