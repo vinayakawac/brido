@@ -5,6 +5,9 @@ use egui::{
 };
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
+
+use crate::tray::{load_default_icon_rgba, TrayEvent, TrayIconManager};
 
 use super::controls::ControlAction;
 use super::header::HeaderState;
@@ -59,6 +62,9 @@ pub struct BridoApp {
     server_ready: Arc<AtomicBool>,
     connected_count: Arc<AtomicUsize>,
     axum_handle: axum_server::Handle,
+    window_visible: bool,
+    tray: TrayIconManager,
+    suppress_close_intercept_until: Instant,
 }
 
 impl BridoApp {
@@ -72,6 +78,9 @@ impl BridoApp {
         axum_handle: axum_server::Handle,
     ) -> Self {
         let qr_payload = format!("brido://{}:{}:{}", ip, port, pin);
+        let (icon_rgba, icon_width, icon_height) = load_default_icon_rgba();
+        let tray = TrayIconManager::new(icon_rgba, icon_width, icon_height);
+
         Self {
             ip,
             pin,
@@ -85,7 +94,21 @@ impl BridoApp {
             server_ready,
             connected_count,
             axum_handle,
+            window_visible: true,
+            tray,
+            suppress_close_intercept_until: Instant::now(),
         }
+    }
+
+    fn hide_to_tray(&mut self, ctx: &egui::Context) {
+        self.window_visible = false;
+        ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
+        ctx.request_repaint_after(Duration::from_millis(100));
+    }
+
+    fn open_from_tray(&mut self) {
+        self.window_visible = true;
+        self.suppress_close_intercept_until = Instant::now() + Duration::from_millis(750);
     }
 
     fn handle_action(&mut self, action: ControlAction, ctx: &egui::Context) {
@@ -117,7 +140,7 @@ impl BridoApp {
                 self.status = ServerStatus::Stopped;
             }
             ControlAction::Minimize => {
-                ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
+                self.hide_to_tray(ctx);
             }
             ControlAction::Shutdown => {
                 self.status = ServerStatus::Stopped;
@@ -129,6 +152,33 @@ impl BridoApp {
 
 impl eframe::App for BridoApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.tray.set_repaint_context(ctx);
+
+        while let Some(event) = self.tray.poll_events() {
+            match event {
+                TrayEvent::Open => self.open_from_tray(),
+                TrayEvent::Quit => {
+                    self.status = ServerStatus::Stopped;
+                    self.shutdown_flag.store(true, Ordering::SeqCst);
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                }
+            }
+        }
+
+        let should_intercept_close = Instant::now() >= self.suppress_close_intercept_until;
+        if should_intercept_close && ctx.input(|i| i.viewport().close_requested()) {
+            if self.shutdown_flag.load(Ordering::SeqCst) {
+                // Allow native close during an actual app shutdown.
+            } else {
+                ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+                self.hide_to_tray(ctx);
+            }
+        }
+
+        if !self.window_visible {
+            ctx.request_repaint_after(Duration::from_millis(100));
+        }
+
         // Request repaint during typing animation or when waiting for server
         if !self.header.is_collapsed() || self.status == ServerStatus::Starting {
             ctx.request_repaint();

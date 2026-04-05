@@ -6,6 +6,7 @@ mod config;
 mod encoder;
 mod model_manager;
 mod stream_server;
+mod tray;
 mod tls;
 mod ui;
 
@@ -226,6 +227,7 @@ fn main() {
             .with_min_inner_size([360.0, 520.0])
             .with_title("Brido Server")
             .with_decorations(true)
+            .with_taskbar(false)
             .with_icon(std::sync::Arc::new(load_icon())),
         ..Default::default()
     };
