@@ -1,135 +1,210 @@
 ﻿# Troubleshooting
 
-## Server
+## Server startup and configuration
 
-### `cargo build` fails — "could not compile"
+### `cargo build --release` fails
 
-- Run `rustup update` to get the latest stable toolchain.
-- If you see a linker error on Windows, install the [MSVC Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/).
+- Run `rustup update` and retry.
+- If Windows linker errors appear, install [MSVC Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/).
 
-### Server starts but shows `IP Address: unknown`
+### Server starts but `IP Address` shows `unknown`
 
-Your machine has no active local network interface. Connect to Wi-Fi or Ethernet and restart the server.
+No active local network interface was detected.
+
+- Connect laptop to Wi-Fi or Ethernet.
+- Restart the server.
 
 ### `Screen capture init failed`
 
-`scrap` requires a display to be attached. This will fail on headless / RDP sessions. Run the server from a physically connected or direct-display session.
+`scrap` requires an active display session.
+
+- Avoid headless sessions.
+- Avoid unsupported RDP scenarios.
+- Run the server in a local desktop session.
 
 ### Port 8080 already in use
 
-The server retries binding automatically on restart. If it persists:
+The server retries binding, but if a process still owns the port:
 
 ```powershell
 Get-NetTCPConnection -LocalPort 8080 -ErrorAction SilentlyContinue |
   ForEach-Object { Stop-Process -Id $_.OwningProcess -Force }
 ```
 
-Then restart via the GUI or re-run the exe.
+Then restart from the GUI.
 
-### Ollama not reachable / `error sending AI request`
+### `.env.local` was not created where expected
 
-1. Make sure Ollama is running: `ollama list`
-2. Verify the URL in `brido_server/src/config.rs` matches your Ollama port (default `http://localhost:11434`).
-3. Check the model name matches exactly what `ollama list` shows.
+Current behavior:
 
-### AI analysis returns an empty result
+- Primary path: same folder as `brido-server.exe`.
+- Fallback path: `%APPDATA%/Brido/.env.local` if install folder is not writable.
 
-The model may not be pulled yet:
+If you launch from a protected folder (for example Program Files), check the fallback path.
 
-```bash
-ollama pull qwen3-vl:8b
-ollama pull gemma3:4b
-ollama pull deepseek-r1:8b
-```
+### Configure AI dialog does not appear on launch
 
-### Server status stays "starting" after restart
+The dialog auto-opens only when no provider key exists.
 
-This was fixed — the GUI now monitors the `server_ready` flag and transitions to "running" automatically. If you built from an older version, rebuild:
+- Open it manually with **configure ai** button in the server UI.
+- If keys already exist in `.env.local`, auto-prompt is intentionally skipped.
+
+### Saving API key fails with permission error
+
+- Make sure the app can write to the active env location.
+- If exe folder is read-only, use fallback location in `%APPDATA%/Brido/.env.local`.
+- Do not run directly from a read-only extracted archive path.
+
+### Analysis says no provider configured
+
+Ensure at least one key is present in `.env.local`:
+
+- `OPENAI_API_KEY`
+- `ANTHROPIC_API_KEY`
+- `GEMINI_API_KEY`
+- `OPENROUTER_API_KEY`
+
+After saving key in UI, restart is required before new key is used.
+
+### Both `.env` and `.env.local` exist and behavior is confusing
+
+Precedence is fixed:
+
+- `.env.local` wins.
+- Legacy `.env` is only a migration source when `.env.local` does not exist yet.
+
+To avoid confusion, keep only `.env.local` for active settings.
+
+### Server stays on `starting...`
+
+If status does not move to running:
+
+- Restart once from UI.
+- Verify port availability.
+- Rebuild latest release binary.
 
 ```powershell
 cd brido_server
 cargo build --release
 ```
 
-### GUI shows "phone disconnected" even when connected
+## Android app connectivity
 
-The server tracks the connected phone count via a shared atomic counter. Make sure you are running the latest build. The counter increments when `POST /api/connect` succeeds.
+### QR tab crashes or camera does not open
 
----
+Camera permission is likely missing.
 
-## Android app
+- Open Android settings for app permissions.
+- Enable Camera.
+- Reopen app.
 
-### App crashes on the Connection screen (QR tab)
+### QR scan does not detect
 
-Camera permission was likely denied. Go to **Settings > Apps > Brido > Permissions > Camera** and enable it, then reopen the app.
+- Ensure server QR is visible and stable.
+- Confirm QR content format is `brido://IP:PORT:PIN`.
+- Use better lighting and hold phone steady.
 
-### QR scan does not detect the code
+### `Invalid PIN` on connect
 
-- The QR must encode the exact string `brido://IP:PORT:PIN` (no spaces, no extra characters).
-- The server GUI displays a scannable QR code — point the phone camera at it.
-- Ensure good lighting and hold the phone ~20-30 cm from the screen.
+PIN changes after server restart. Re-scan QR or re-enter current PIN from server UI.
 
-### "Invalid PIN" when connecting
+### Connected but stream shows waiting for frames
 
-The PIN changes every time the server starts or restarts. Check the current PIN in the server GUI and re-enter it (or scan the new QR code).
-
-### App connects but stream shows "Waiting for frames..."
-
-1. Confirm the server GUI shows "server running".
-2. Check that port 8080 is not blocked by Windows Firewall:
+- Confirm server UI says running.
+- Check firewall rule for TCP 8080.
 
 ```powershell
 New-NetFirewallRule -DisplayName "Brido" -Direction Inbound -Protocol TCP -LocalPort 8080 -Action Allow
 ```
 
-3. The stream uses WSS (secure WebSocket). Ensure no proxy or VPN is intercepting TLS traffic on the LAN.
-4. Try restarting the server from the GUI and reconnecting.
+- Ensure phone and laptop are on same LAN.
 
-> **Root cause (fixed):** An earlier version broke the stream by using `if tx.send(jpeg).is_err() { break; }` in the capture thread. Since the initial broadcast receiver was immediately dropped, `send()` returned `Err` before any WebSocket client connected, exiting the capture loop immediately. Fixed by storing a keep-alive receiver in `AppState._keep_alive_rx` so there is always at least one subscriber until the server shuts down.
+### `Cannot reach server` in manual entry
 
-### Stream is laggy or freezes
+- Verify phone and laptop are on same Wi-Fi.
+- Verify IP and PIN from server UI.
+- Test endpoint in browser: `https://<IP>:8080/api/qr-info` and accept self-signed warning.
 
-- Switch to a 5 GHz Wi-Fi band if possible.
-- The default is 15 fps at quality 65. You can adjust in `brido_server/src/config.rs`.
-- Close other CPU-heavy applications on the laptop.
+### Stream lag or freezes
 
-### "Cannot reach server" on Manual Entry
+- Prefer 5 GHz Wi-Fi.
+- Reduce system load on laptop.
+- Lower capture settings if needed.
 
-- Confirm phone and laptop are on the **same** Wi-Fi network.
-- Ping the laptop IP from a network tool app on the phone.
-- Confirm the server GUI shows "server running".
-- Try `https://<IP>:8080/api/qr-info` in a browser (accept the self-signed cert warning).
+## GitHub Releases and workflow
 
-### UI is cut off by navigation bar or status bar
+### Workflow error: `Unrecognized named-value: 'secrets'`
 
-All screens use `WindowInsets.systemBars` to avoid both the top status bar and bottom navigation bar. If content is still clipped, ensure the app has `enableEdgeToEdge()` in `MainActivity.kt` (it does by default).
+This is caused by using `secrets.*` directly in `if:` expressions.
 
----
+Current workflow fix:
 
-## Gradle / Android Studio
+- Signing availability is computed in a step output.
+- Later steps use `if: steps.signing.outputs.enabled == 'true'`.
 
-### Gradle sync fails after adding dependencies
+If the error still appears in GitHub UI, ensure your branch includes latest `.github/workflows/release.yml` and rerun.
 
-1. **File > Sync Project with Gradle Files**.
-2. If that fails, **File > Invalidate Caches > Invalidate and Restart**.
-3. Check `brido_app/gradle/libs.versions.toml` — version strings must not contain spaces.
+### Release APK is not published
 
-### `CameraX` or `ML Kit` classes not found
+Expected behavior when signing secrets are missing.
 
-Ensure the dependencies exist in `brido_app/app/build.gradle.kts` and run a Gradle sync.
+Required repository secrets:
 
----
+- `ANDROID_KEYSTORE_BASE64`
+- `ANDROID_KEYSTORE_PASSWORD`
+- `ANDROID_KEY_ALIAS`
+- `ANDROID_KEY_PASSWORD`
 
-## General FAQ
+Without these, debug APK still publishes and signed release APK is skipped.
 
-### Can I change the port?
+### Release workflow did not trigger
 
-Edit `port` in `brido_server/src/config.rs` and rebuild.
+Workflow trigger is tag push with `v*` pattern.
 
-### Can I run without Ollama?
+```powershell
+git tag v1.0.0
+git push origin v1.0.0
+```
 
-Yes — the server, GUI, and stream work without Ollama. Only the **Analyse** feature requires Ollama to be running with at least one model pulled.
+### Server artifacts missing in release
 
-### Why self-signed TLS?
+Server packaging depends on:
 
-Android requires HTTPS for modern network security. The server generates a self-signed certificate at startup via `rcgen`, and the Android app trusts all certificates for LAN connections. This avoids the need for a real CA while keeping traffic encrypted.
+- `scripts/package_server_release.ps1`
+- `brido_server/.env.local.template`
+- release build output at `brido_server/target/release/brido-server.exe`
+
+## Local build and packaging
+
+### Packaging script fails locally
+
+From repo root, run:
+
+```powershell
+.\scripts\package_server_release.ps1 -Tag v0.1.0-local -OutputDir release_assets/server
+```
+
+If script complains about missing files, ensure server release build and template file exist.
+
+### Debug APK build warnings about native symbols
+
+`stripDebugDebugSymbols` warnings for some libraries are usually non-fatal. If build ends with `BUILD SUCCESSFUL`, artifact is valid.
+
+## Security and secrets
+
+### API key accidentally committed
+
+1. Rotate the exposed key immediately.
+2. Remove secret from repository history if needed.
+3. Keep runtime keys only in `.env.local`.
+
+Ignore rules should include:
+
+- `brido_server/.env`
+- `brido_server/.env.local`
+- `brido_server/.env.local.*`
+- keep `brido_server/.env.local.template` tracked
+
+### Why HTTPS with self-signed cert?
+
+Traffic is encrypted over LAN with server-generated TLS cert. Android client accepts the self-signed cert for local usage.
