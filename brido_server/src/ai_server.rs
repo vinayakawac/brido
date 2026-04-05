@@ -109,7 +109,7 @@ pub async fn handle_models(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Vec<ModelInfo>>, StatusCode> {
     verify_token(&headers, &state).await?;
-    Ok(Json(get_supported_models()))
+    Ok(Json(get_supported_models(&state.config)))
 }
 
 pub async fn handle_analyse(
@@ -127,24 +127,22 @@ pub async fn handle_analyse(
         .await
         .map_err(|_| (StatusCode::SERVICE_UNAVAILABLE, "Analysis queue unavailable".to_string()))?;
 
-    let model = req
-        .model
-        .unwrap_or_else(|| state.config.default_vision_model.clone());
+    let manager = ModelManager::new(&state.config, &state.http_client);
 
-    let manager = ModelManager::new(&state.config.ollama_url, &state.http_client);
-
-    let result = manager
-        .analyse_image(&req.image_base64, &model, req.prompt.as_deref())
+    let (result, model_used) = manager
+        .analyse_image(&req.image_base64, req.model.as_deref(), req.prompt.as_deref())
         .await
         .map_err(|e| {
             let msg = format!("{e:#}");
-            tracing::error!("Analysis failed (model={}): {}", model, msg);
+            tracing::error!("Analysis failed: {}", msg);
 
             if msg.contains("Image payload is empty")
                 || msg.contains("invalid format")
                 || msg.contains("invalid checksum")
             {
                 (StatusCode::BAD_REQUEST, msg)
+            } else if msg.contains("401") || msg.contains("403") {
+                (StatusCode::BAD_GATEWAY, msg)
             } else if msg.contains("requires more system memory")
                 || msg.contains("out of memory")
                 || msg.contains("insufficient memory")
@@ -159,7 +157,7 @@ pub async fn handle_analyse(
 
     Ok(Json(AnalyseResponse {
         result,
-        model_used: model,
+        model_used,
     }))
 }
 
@@ -234,19 +232,14 @@ fn detect_gpu() -> String {
     "GPU info unavailable".to_string()
 }
 
-fn get_supported_models() -> Vec<ModelInfo> {
-    vec![
-        ModelInfo {
-            name: "qwen3-vl:4b".to_string(),
-            file: "qwen3-vl:4b".to_string(),
-            capability: "vision, screen analysis".to_string(),
-            size_gb: 3.3,
-        },
-        ModelInfo {
-            name: "deepseek-r1:8b".to_string(),
-            file: "deepseek-r1:8b".to_string(),
-            capability: "reasoning, code, algorithms".to_string(),
-            size_gb: 5.0,
-        },
-    ]
+fn get_supported_models(config: &crate::config::Config) -> Vec<ModelInfo> {
+    ModelManager::available_models(config)
+        .into_iter()
+        .map(|(name, file, capability, size_gb)| ModelInfo {
+            name,
+            file,
+            capability,
+            size_gb,
+        })
+        .collect()
 }

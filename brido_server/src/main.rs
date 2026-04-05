@@ -177,6 +177,11 @@ pub fn start_server(
 }
 
 fn main() {
+    // Load local-only configuration file if present.
+    if let Err(err) = dotenvy::from_filename(".env.local") {
+        tracing::debug!("No .env.local loaded: {}", err);
+    }
+
     tracing_subscriber::fmt::init();
 
     let config = Config::default();

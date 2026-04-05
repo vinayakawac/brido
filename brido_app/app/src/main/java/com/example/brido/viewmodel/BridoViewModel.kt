@@ -43,7 +43,6 @@ class BridoViewModel : ViewModel() {
         private set
     var isAnalysing by mutableStateOf(false)
         private set
-    var selectedModel by mutableStateOf("qwen3-vl:4b")
 
     // ── Internal ─────────────────────────────────────────────────────────
     private var apiService: BridoApiService? = null
@@ -147,7 +146,6 @@ class BridoViewModel : ViewModel() {
                         token = "Bearer $token",
                         request = AnalyseRequest(
                             imageBase64 = imageBase64,
-                            model = selectedModel,
                         ),
                     )
                 }
