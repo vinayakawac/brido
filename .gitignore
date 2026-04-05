@@ -36,6 +36,7 @@ desktop.ini
 # ── Docs (ignore all .md except README and models) ───────────────────────────
 *.md
 !README.md
+!troubleshooting.md
 !models.md
 
 # ── Misc ─────────────────────────────────────────────────────────────────────
