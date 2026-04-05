@@ -1,288 +1,126 @@
-# Brido App
+﻿# Brido App
 
-> Kotlin/Compose Android application for the Brido system. Receives a live JPEG stream from the laptop server over WSS, displays it full-screen, and sends frames to the server for on-demand AI analysis — all over a local Wi-Fi TLS connection.
+Android client application for Brido, built with Kotlin and Jetpack Compose.
 
----
-
-## Table of Contents
-
-- [Overview](#overview)
-- [Screens](#screens)
-- [Project Structure](#project-structure)
-- [Navigation Flow](#navigation-flow)
-- [Networking](#networking)
-- [Frame Streaming](#frame-streaming)
-- [AI Analysis](#ai-analysis)
-- [Markdown Terminal](#markdown-terminal)
-- [Prerequisites](#prerequisites)
-- [Build & Run](#build--run)
-- [Gradle & Dependencies](#gradle--dependencies)
-- [Security Notes](#security-notes)
+It connects to the Brido server, displays a live screen stream, and sends the latest frame for AI analysis on demand.
 
 ---
 
 ## Overview
 
-The Android app is the **lightweight client** — all heavy work (screen capture, JPEG encoding, AI inference) stays on the laptop. The phone's role is:
+The app handles:
 
-1. **Pairing** — scan a QR code (or enter IP + PIN manually) to connect
-2. **Streaming** — display the live JPEG stream from the laptop
-3. **Analysis** — on button press, capture the current frame, upload it to the server, and show the AI result in a styled terminal panel
-
-CPU usage on the phone stays below ~15%.
+1. Pairing with server using QR or manual IP/PIN.
+2. Receiving JPEG frames over secure WebSocket.
+3. Displaying stream in real time.
+4. Triggering analysis requests for the current frame.
+5. Rendering server responses in the terminal panel.
 
 ---
 
 ## Screens
 
 ### WelcomeScreen
-Full-screen splash with the Brido logo. Auto-advances to Connection after 2.5 s, or immediately on tap.
+
+Splash screen shown at startup.
 
 ### ConnectionScreen
-Two-tab interface:
 
-| Tab | Description |
-|-----|-------------|
-| **QR Scanner** | CameraX + ML Kit barcode scanner. Reads `brido://IP:PORT:PIN` format and auto-connects |
-| **Manual Entry** | Text fields for IP address and PIN. Tap **Connect** to authenticate |
+Two connection modes:
 
-On successful connection the server returns hardware info (CPU, RAM, storage, GPU) which is shown in cards on the screen before navigating to the stream.
+- QR Scanner tab (CameraX + ML Kit)
+- Manual entry tab (IP + PIN)
+
+On successful connect, token and system information are stored and stream starts.
 
 ### StreamScreen
-Main screen — split into two vertical panels:
 
-| Panel | Weight | Content |
-|-------|--------|---------|
-| **Stream Viewer** | 0.45 | Live JPEG frames rendered as a `Bitmap` via `Image()` composable |
-| **Terminal Panel** | 0.55 | Scrollable styled output — AI results, status messages, markdown rendered |
+Main screen with:
 
-Action buttons:
-- **anAlyse** — captures the latest frame, resizes to 1024 px width (JPEG quality 80), POSTs to `/api/analyse`, appends result to terminal
-- **diScoNnect** — closes the WebSocket, clears state, navigates back to ConnectionScreen
-
----
-
-## Project Structure
-
-```
-app/src/main/java/com/example/brido/
-├── MainActivity.kt                  Entry point — sets up Compose + navigation
-├── navigation/
-│   └── BridoNavigation.kt           NavHost — welcome → connection → stream
-├── screens/
-│   ├── WelcomeScreen.kt             Animated splash screen
-│   ├── ConnectionScreen.kt          QR + manual entry, hardware info cards
-│   ├── StreamScreen.kt              Stream viewer + terminal panel + buttons
-│   └── QrScannerTab.kt              CameraX + ML Kit barcode integration
-├── viewmodel/
-│   └── BridoViewModel.kt            Connection, streaming, and analysis state
-├── network/
-│   ├── BridoApiService.kt           Retrofit service interface
-│   └── RetrofitClient.kt            OkHttp singleton with trust-all TLS
-├── stream/
-│   └── StreamManager.kt             OkHttp WSS client — delivers Bitmap frames
-├── models/
-│   └── ApiModels.kt                 Request/response data classes
-└── ui/theme/
-    ├── Color.kt                     Dark theme colour palette
-    ├── Theme.kt                     MaterialTheme setup
-    └── Type.kt                      Typography
-```
-
----
-
-## Navigation Flow
-
-```
-WelcomeScreen
-    │  2.5 s or tap
-    ▼
-ConnectionScreen
-    ├── Tab 0: QrScannerTab
-    │       CameraX preview → ML Kit BarcodeScanning
-    │       detect "brido://IP:PORT:PIN" → call connect()
-    └── Tab 1: ManualEntryTab
-            IP + PIN fields → tap Connect → call connect()
-    │
-    │  POST /api/connect → 200 OK + token
-    ▼
-StreamScreen
-    ├── StreamManager connects WSS → frames → currentFrame
-    ├── anAlyse → POST /api/analyse → terminal entry
-    └── diScoNnect → viewModel.disconnect() → popBackStack()
-```
-
-The back arrow on ConnectionScreen also uses `popBackStack()` to go back to Welcome.
+- Stream viewer panel.
+- Terminal panel for analysis output and status lines.
+- `anAlyse` and `diScoNnect` actions.
 
 ---
 
 ## Networking
 
-All network operations use **HTTPS / WSS** on port `8080`. The server uses a self-signed TLS certificate, so the app uses a custom `X509TrustManager` that accepts all certificates — appropriate for a local LAN-only tool.
+Base URL pattern:
 
-### RetrofitClient (`network/RetrofitClient.kt`)
+- `https://<SERVER_IP>:8080`
+- `wss://<SERVER_IP>:8080/ws/stream?token=<token>`
 
-Singleton that creates:
-- `OkHttpClient` with a trust-all `SSLContext` and `HostnameVerifier`
-- `Retrofit` instance pointed at `https://<SERVER_IP>:8080`
-- Moshi JSON converter
+API calls:
 
-### BridoApiService (`network/BridoApiService.kt`)
+| Method | Path | Purpose |
+|--------|------|---------|
+| `POST` | `api/connect` | Validate PIN and return token/system info |
+| `GET` | `api/system-info` | Fetch server hardware info |
+| `GET` | `api/models` | Fetch model/provider entries from server |
+| `POST` | `api/analyse` | Analyze current frame |
 
-```kotlin
-interface BridoApiService {
-    @POST("/api/connect")       suspend fun connect(body: ConnectRequest): ConnectResponse
-    @GET("/api/qr-info")        suspend fun getQrInfo(): QrInfoResponse
-    @GET("/api/system-info")    suspend fun getSystemInfo(): SystemInfoResponse
-    @GET("/api/models")         suspend fun getModels(): ModelsResponse
-    @POST("/api/analyse")       suspend fun analyse(body: AnalyseRequest): AnalyseResponse
-}
-```
-
-All calls are `suspend` functions called from the ViewModel's `viewModelScope`.
+`RetrofitClient` config uses a trust-all TLS setup to accept server self-signed certs on local LAN.
 
 ---
 
-## Frame Streaming
+## Analysis Flow
 
-`StreamManager` opens an OkHttp WebSocket to `wss://<IP>:8080/ws/stream?token=<token>`.
+When `anAlyse` is pressed:
 
-```
-StreamManager.connect()
-    └── OkHttp WebSocket listener
-          onMessage(bytes: ByteString)
-            → BitmapFactory.decodeByteArray()     // JPEG → Bitmap
-            → latestFrame = bitmap                // stored for Analyse
-            → onFrame(bitmap) callback
-              → BridoViewModel.currentFrame       // StateFlow
-                → StreamScreen recomposition → Image()
-```
+1. Take latest frame from stream manager.
+2. Resize/compress frame to JPEG (first pass: width 1024, quality 80).
+3. Send `/api/analyse` with base64 image.
+4. If server returns 5xx, retry once with smaller image (width 768, quality 65).
+5. Append server `result` text to terminal.
 
-- Frames arrive at ~15 fps
-- The latest frame is stored in `latestFrame` so `analyse()` always uses the most recent visible frame
-- Connection errors and close events update `connectionState` in the ViewModel
+Returned `model_used` is supplied by server and may vary by provider availability and request routing.
 
 ---
 
-## AI Analysis
+## Project Structure
 
-When the user taps **anAlyse**:
-
-```kotlin
-// BridoViewModel.kt
-fun analyse() {
-    val bitmap = streamManager.latestFrame ?: return
-    val scaled = Bitmap.createScaledBitmap(bitmap, 1024, scaledHeight, true)
-    val jpeg = ByteArrayOutputStream()
-    scaled.compress(Bitmap.CompressFormat.JPEG, 80, jpeg)
-    val base64 = Base64.encodeToString(jpeg.toByteArray(), Base64.NO_WRAP)
-
-    viewModelScope.launch {
-        val response = api.analyse(AnalyseRequest(imageBase64 = base64, model = selectedModel))
-        addTerminalEntry(response.result.trim())   // full block, no line-splitting
-    }
-}
-```
-
-Image sent: **1024 px max width**, **JPEG quality 80**.  
-Model selected in ViewModel: `gemma3:4b` (overridden by server to `qwen3-vl:8b` if available).
+| Path | Purpose |
+|------|---------|
+| `MainActivity.kt` | App entry and navigation host setup |
+| `navigation/BridoNavigation.kt` | Screen navigation graph |
+| `screens/` | UI screens and scanner tab |
+| `viewmodel/BridoViewModel.kt` | Connection, stream, analysis state and actions |
+| `network/RetrofitClient.kt` | Retrofit + OkHttp setup |
+| `network/BridoApiService.kt` | API interface |
+| `stream/StreamManager.kt` | WSS frame stream handling |
+| `models/ApiModels.kt` | API request/response models |
 
 ---
 
-## Markdown Terminal
+## Build and Run
 
-`StreamScreen.kt` renders each terminal entry through a full **markdown parser** — `parseMarkdown(block)`.
+1. Open `brido_app/` in Android Studio.
+2. Run on a physical Android device on same network as server.
 
-### Supported syntax
-
-| Syntax | Render |
-|--------|--------|
-| ```` ```lang … ``` ```` | Green text on dark `#1A1A1A` background, monospace |
-| `## Heading` / `# H1` / `### H3` | Bold green, size scaled by level |
-| `[model-name]` | Bold accent colour (model tag) |
-| `---` | Horizontal rule line |
-| `> blockquote` | `│ ` prefix in accent colour |
-| `- item` / `* item` | `•` bullet in accent colour |
-| `1. item` | Numbered list with bold accent number |
-| `**bold**` | Bright white `#E0E0E0` |
-| `*italic*` | Italic span |
-| `***bold italic***` | Bold + italic combined |
-| `` `inline code` `` | Green on dark `#2A2A2A` background |
-| `~~strikethrough~~` | Strikethrough |
-
-Compiled regex patterns process inline spans with `DOT_MATCHES_ALL` for robustness.
-
-### Terminal entry types
-
-| Prefix / Pattern | Colour | Meaning |
-|-----------------|--------|---------|
-| Starts with `>` | Green | Status / connection message |
-| Matches `[...]` | Accent | Model tag from server response |
-| Everything else | `parseMarkdown()` | AI result with full markdown |
-
----
-
-## Prerequisites
-
-| Tool | Version | Notes |
-|------|---------|-------|
-| Android Studio | Ladybug / Meerkat+ | Gradle sync, device run |
-| JDK | 17+ | Bundled with recent Android Studio |
-| Android device | API 24+ (Android 7.0+) | Physical device on same Wi-Fi |
-| Brido server | running on laptop | Same local network |
-
-> The app does **not** work on an emulator for streaming — screen capture and local network access need a real device.
-
----
-
-## Build & Run
-
-1. Open `brido_app/` in Android Studio (not the root folder)
-2. Let Gradle sync complete
-3. Ensure your Android device is connected via USB with USB debugging enabled
-4. Tap **Run ▶** or press `Shift+F10`
-
-### Gradle commands
+Gradle commands:
 
 ```bash
-# From brido_app/
-./gradlew assembleDebug          # Build debug APK
-./gradlew assembleRelease        # Build release APK (needs signing config)
-./gradlew installDebug           # Build + install on connected device
-./gradlew lint                   # Run lint checks
+cd brido_app
+./gradlew assembleDebug
+./gradlew installDebug
+./gradlew lint
 ```
 
 ---
 
-## Gradle & Dependencies
+## Requirements
 
-**`app/build.gradle.kts`:**
-
-| Dependency | Version | Purpose |
-|------------|---------|---------|
-| Compose BOM | latest | Compose UI framework |
-| Material 3 | latest | MD3 components and theming |
-| `androidx.navigation:navigation-compose` | 2.8+ | Screen navigation |
-| `retrofit2:retrofit` | 2.11.0 | HTTP client + JSON |
-| `com.squareup.okhttp3:okhttp` | 4.12.0 | WebSocket + custom TLS |
-| `androidx.camera:camera-*` | 1.4.1 | CameraX capture pipeline |
-| `com.google.mlkit:barcode-scanning` | 17.3.0 | QR code decoding |
-| `androidx.lifecycle:lifecycle-viewmodel-compose` | 2.9.0 | ViewModel integration |
-
-**SDK targets:**
-
-| Setting | Value |
-|---------|-------|
-| `compileSdk` | 36 |
-| `targetSdk` | 36 |
-| `minSdk` | 24 |
-| `jvmTarget` | 11 |
+- Android Studio (recent stable)
+- Android device API 24+
+- Brido server running on same local network
 
 ---
 
-## Security Notes
+## Troubleshooting
 
-- **Trust-all TLS** — the app accepts any server certificate. This is intentional for a LAN-only tool with a self-signed cert. Do not use this pattern for internet-facing apps.
-- **PIN required** — every connection requires the 6-digit PIN displayed on the server GUI. The PIN changes on every server restart.
-- **Token in memory only** — the session token is never written to disk or SharedPreferences.
-- **No analytics / telemetry** — the app makes no network requests outside the local Brido server.
+| Problem | Check |
+|---------|-------|
+| Cannot connect | Verify IP/PIN and same Wi-Fi |
+| Stream disconnects | Check server process and firewall |
+| Analyse shows error | Verify server provider configuration/API key |
+| QR does not scan | Improve lighting/focus or use manual connect |
