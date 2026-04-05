@@ -139,14 +139,14 @@ This is caused by using `secrets.*` directly in `if:` expressions.
 
 Current workflow fix:
 
-- Signing availability is computed in a step output.
-- Later steps use `if: steps.signing.outputs.enabled == 'true'`.
+- Workflow no longer uses `secrets.*` in `if:` expressions.
+- Secrets are validated inside a shell step before decoding keystore and building release APK.
 
 If the error still appears in GitHub UI, ensure your branch includes latest `.github/workflows/release.yml` and rerun.
 
-### Release APK is not published
+### Release workflow fails: Android signing secrets missing
 
-Expected behavior when signing secrets are missing.
+Tagged releases require a signed Android release APK. If any signing secret is missing, the workflow fails before publish.
 
 Required repository secrets:
 
@@ -155,7 +155,7 @@ Required repository secrets:
 - `ANDROID_KEY_ALIAS`
 - `ANDROID_KEY_PASSWORD`
 
-Without these, debug APK still publishes and signed release APK is skipped.
+After setting secrets, rerun the release by pushing a new tag.
 
 ### Release workflow did not trigger
 

@@ -67,7 +67,7 @@ GitHub Releases publish these artifacts on every `v*` tag:
 - `brido-server-<tag>.exe`
 - `brido-server-<tag>-bundle.zip` (exe + `.env.local.template` + server README)
 - `brido-android-debug-<tag>.apk`
-- `brido-android-release-<tag>.apk` (only when Android signing secrets are configured)
+- `brido-android-release-<tag>.apk` (required for tagged releases)
 
 ---
 

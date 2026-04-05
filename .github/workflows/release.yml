@@ -77,29 +77,32 @@ jobs:
           name: android-debug-apk
           path: brido_app/app/build/outputs/apk/debug/app-debug.apk
 
-      - name: Check Android signing secrets
-        id: signing
+      - name: Validate Android signing secrets
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
-          if [ -n "$ANDROID_KEYSTORE_BASE64" ] && [ -n "$ANDROID_KEYSTORE_PASSWORD" ] && [ -n "$ANDROID_KEY_ALIAS" ] && [ -n "$ANDROID_KEY_PASSWORD" ]; then
-            echo "enabled=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          missing=0
+          for secret_name in ANDROID_KEYSTORE_BASE64 ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD; do
+            if [ -z "${!secret_name}" ]; then
+              echo "::error::Missing required repository secret: ${secret_name}"
+              missing=1
+            fi
+          done
+          if [ "$missing" -ne 0 ]; then
+            echo "::error::Tagged releases require signed Android release APK."
+            exit 1
           fi
 
       - name: Decode Android signing keystore
-        if: steps.signing.outputs.enabled == 'true'
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
         run: |
           echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/brido-release.keystore"
 
       - name: Build signed release APK
-        if: steps.signing.outputs.enabled == 'true'
         env:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
@@ -113,15 +116,10 @@ jobs:
             -Pandroid.injected.signing.key.password="$ANDROID_KEY_PASSWORD"
 
       - name: Upload signed release APK
-        if: steps.signing.outputs.enabled == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: android-release-apk
           path: brido_app/app/build/outputs/apk/release/app-release.apk
-
-      - name: Note release APK skip
-        if: steps.signing.outputs.enabled != 'true'
-        run: echo "Release APK build skipped because Android signing secrets are not configured."
 
   publish-release:
     runs-on: ubuntu-latest
@@ -142,9 +140,8 @@ jobs:
           name: android-debug-apk
           path: release_assets/android-debug
 
-      - name: Download release APK artifact (if available)
+      - name: Download release APK artifact
         uses: actions/download-artifact@v4
-        continue-on-error: true
         with:
           name: android-release-apk
           path: release_assets/android-release
@@ -153,18 +150,38 @@ jobs:
         run: |
           tag="${{ github.ref_name }}"
           mkdir -p release_assets/android
-          if [ -f "release_assets/android-debug/app-debug.apk" ]; then
-            cp "release_assets/android-debug/app-debug.apk" "release_assets/android/brido-android-debug-${tag}.apk"
-          fi
-          if [ -f "release_assets/android-release/app-release.apk" ]; then
-            cp "release_assets/android-release/app-release.apk" "release_assets/android/brido-android-release-${tag}.apk"
+          cp "release_assets/android-debug/app-debug.apk" "release_assets/android/brido-android-debug-${tag}.apk"
+          cp "release_assets/android-release/app-release.apk" "release_assets/android/brido-android-release-${tag}.apk"
+
+      - name: Verify required release assets
+        run: |
+          tag="${{ github.ref_name }}"
+          required_files=(
+            "release_assets/server/brido-server-${tag}.exe"
+            "release_assets/server/brido-server-${tag}-bundle.zip"
+            "release_assets/server/brido-server-${tag}.sha256"
+            "release_assets/android/brido-android-debug-${tag}.apk"
+            "release_assets/android/brido-android-release-${tag}.apk"
+          )
+          missing=0
+          for file in "${required_files[@]}"; do
+            if [ ! -f "$file" ]; then
+              echo "::error::Missing required release asset: $file"
+              missing=1
+            fi
+          done
+          if [ "$missing" -ne 0 ]; then
+            exit 1
           fi
 
       - name: Publish GitHub release assets
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
-          fail_on_unmatched_files: false
+          fail_on_unmatched_files: true
           files: |
-            release_assets/server/*
-            release_assets/android/*.apk
+            release_assets/server/brido-server-${{ github.ref_name }}.exe
+            release_assets/server/brido-server-${{ github.ref_name }}-bundle.zip
+            release_assets/server/brido-server-${{ github.ref_name }}.sha256
+            release_assets/android/brido-android-debug-${{ github.ref_name }}.apk
+            release_assets/android/brido-android-release-${{ github.ref_name }}.apk
