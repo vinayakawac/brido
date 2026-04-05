@@ -42,3 +42,12 @@ desktop.ini
 *.ico
 *.png
 !brido.png
+
+# ── Secrets ──────────────────────────────────────────────────────────────────
+brido_server/.env
+brido_server/.env.local
+brido_server/.env.local.*
+!brido_server/.env.local.template
+
+# ── Local release outputs ────────────────────────────────────────────────────
+release_assets/

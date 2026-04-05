@@ -39,18 +39,7 @@ Brido is a two-part system:
 
 ## Quick Start
 
-### 1. Configure AI provider
-
-Create `brido_server/.env.local` with at least one provider key.
-
-```dotenv
-# Example: OpenRouter
-OPENROUTER_API_KEY=<YOUR_API_KEY>
-OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
-OPENROUTER_MODEL=qwen/qwen3.6-plus:free
-```
-
-### 2. Start the server
+### 1. Start the server
 
 ```bash
 cd brido_server
@@ -58,15 +47,27 @@ cargo run --release
 ```
 
 The server GUI opens and shows QR code, IP, and PIN.
+On first run, Brido automatically creates `.env.local` beside the running executable and opens a setup prompt to choose provider + API key.
 
-### 3. Run the Android app
+If the executable directory is read-only (for example, Program Files), Brido falls back to `%APPDATA%/Brido/.env.local`.
+
+### 2. Run the Android app
 
 Open `brido_app/` in Android Studio and run on a physical device connected to the same Wi-Fi.
 
-### 4. Pair and analyse
+### 3. Pair and analyse
 
 - Scan QR (or enter IP and PIN manually) in the app.
 - Press `anAlyse` on the phone to analyze the current frame.
+
+### 4. Release downloads
+
+GitHub Releases publish these artifacts on every `v*` tag:
+
+- `brido-server-<tag>.exe`
+- `brido-server-<tag>-bundle.zip` (exe + `.env.local.template` + server README)
+- `brido-android-debug-<tag>.apk`
+- `brido-android-release-<tag>.apk` (only when Android signing secrets are configured)
 
 ---
 

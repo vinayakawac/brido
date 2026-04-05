@@ -18,9 +18,22 @@ Server responsibilities:
 
 ## AI Provider Configuration
 
-The server loads `brido_server/.env.local` automatically at startup.
+On startup, the server loads `.env.local` from the same folder as `brido-server.exe`.
+
+If that folder is not writable, it falls back to `%APPDATA%/Brido/.env.local`.
+
+Precedence rules:
+
+1. `.env.local` is always authoritative.
+2. If both `.env` and `.env.local` exist, `.env.local` wins.
+3. Legacy `.env` values are migrated once when `.env.local` is first created.
 
 At least one provider API key must be set.
+
+On first run with no provider key, the GUI opens a **Configure AI** prompt.
+Choose provider + API key there, and Brido writes it only to `.env.local`.
+
+After save, Brido shows a restart-required message so changes can be reloaded safely.
 
 ### Example `.env.local` (OpenRouter)
 
@@ -30,6 +43,8 @@ OPENROUTER_API_KEY=<YOUR_API_KEY>
 OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
 OPENROUTER_MODEL=qwen/qwen3.6-plus:free
 ```
+
+You can also start from `brido_server/.env.local.template`.
 
 ### Supported provider environment variables
 

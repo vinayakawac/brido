@@ -11,6 +11,7 @@ mod tls;
 mod ui;
 
 use std::collections::HashSet;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -178,14 +179,36 @@ pub fn start_server(
 }
 
 fn main() {
-    // Load local-only configuration file if present.
-    if let Err(err) = dotenvy::from_filename(".env.local") {
-        tracing::debug!("No .env.local loaded: {}", err);
-    }
-
     tracing_subscriber::fmt::init();
 
+    let (runtime_env, runtime_loaded) = match config::bootstrap_runtime_env() {
+        Ok(runtime) => (runtime, true),
+        Err(err) => {
+            tracing::error!("Failed to bootstrap env configuration: {}", err);
+
+            let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+            (
+                config::RuntimeEnvPaths {
+                    active_env_path: cwd.join(".env.local"),
+                    primary_env_path: cwd.join(".env.local"),
+                    fallback_env_path: cwd.join(".env.local"),
+                    legacy_env_path: cwd.join(".env"),
+                    is_using_fallback: false,
+                    migrated_legacy_env: false,
+                },
+                false,
+            )
+        }
+    };
+
+    if !runtime_loaded {
+        if let Err(err) = config::load_runtime_env(&runtime_env) {
+            tracing::error!("Failed to load runtime env: {}", err);
+        }
+    }
+
     let config = Config::default();
+    let provider_configured = config.has_any_provider_key();
     let ip = local_ip_address::local_ip()
         .map(|ip| ip.to_string())
         .unwrap_or_else(|_| "unknown".to_string());
@@ -215,6 +238,8 @@ fn main() {
         ip,
         pin,
         port,
+        runtime_env,
+        provider_configured,
         shutdown_flag.clone(),
         server_ready.clone(),
         connected_count,

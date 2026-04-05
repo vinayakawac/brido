@@ -7,6 +7,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use crate::config::{self, ProviderKind, RuntimeEnvPaths};
 use crate::tray::{load_default_icon_rgba, TrayEvent, TrayIconManager};
 
 use super::controls::ControlAction;
@@ -55,14 +56,21 @@ pub struct BridoApp {
     pub port: u16,
     pub status: ServerStatus,
     pub phone_connected: bool,
+    pub provider_configured: bool,
     header: HeaderState,
     qr_texture: Option<TextureHandle>,
     qr_payload: String,
+    runtime_env: RuntimeEnvPaths,
     shutdown_flag: Arc<AtomicBool>,
     server_ready: Arc<AtomicBool>,
     connected_count: Arc<AtomicUsize>,
     axum_handle: axum_server::Handle,
     window_visible: bool,
+    show_setup_modal: bool,
+    selected_provider: ProviderKind,
+    api_key_input: String,
+    setup_feedback: Option<(String, bool)>,
+    restart_required: bool,
     tray: TrayIconManager,
     suppress_close_intercept_until: Instant,
 }
@@ -72,6 +80,8 @@ impl BridoApp {
         ip: String,
         pin: String,
         port: u16,
+        runtime_env: RuntimeEnvPaths,
+        provider_configured: bool,
         shutdown_flag: Arc<AtomicBool>,
         server_ready: Arc<AtomicBool>,
         connected_count: Arc<AtomicUsize>,
@@ -87,17 +97,189 @@ impl BridoApp {
             port,
             status: ServerStatus::Running,
             phone_connected: false,
+            provider_configured,
             header: HeaderState::default(),
             qr_texture: None,
             qr_payload,
+            runtime_env,
             shutdown_flag,
             server_ready,
             connected_count,
             axum_handle,
             window_visible: true,
+            show_setup_modal: !provider_configured,
+            selected_provider: Self::provider_from_env(),
+            api_key_input: String::new(),
+            setup_feedback: None,
+            restart_required: false,
             tray,
             suppress_close_intercept_until: Instant::now(),
         }
+    }
+
+    fn provider_from_env() -> ProviderKind {
+        if !std::env::var("OPENAI_API_KEY")
+            .unwrap_or_default()
+            .trim()
+            .is_empty()
+        {
+            ProviderKind::OpenAI
+        } else if !std::env::var("ANTHROPIC_API_KEY")
+            .unwrap_or_default()
+            .trim()
+            .is_empty()
+        {
+            ProviderKind::Anthropic
+        } else if !std::env::var("GEMINI_API_KEY")
+            .unwrap_or_default()
+            .trim()
+            .is_empty()
+        {
+            ProviderKind::Gemini
+        } else {
+            ProviderKind::OpenRouter
+        }
+    }
+
+    fn save_provider_setup(&mut self) {
+        match config::save_provider_api_key(&self.runtime_env, self.selected_provider, &self.api_key_input)
+        {
+            Ok(_) => {
+                self.api_key_input.clear();
+                self.provider_configured = true;
+                self.restart_required = true;
+                self.setup_feedback = Some((
+                    format!(
+                        "Saved {} key to {}. Restart required to apply changes.",
+                        self.selected_provider.label(),
+                        self.runtime_env.active_env_path.display()
+                    ),
+                    false,
+                ));
+            }
+            Err(err) => {
+                self.setup_feedback = Some((format!("Failed to save key: {}", err), true));
+            }
+        }
+    }
+
+    fn render_setup_modal(&mut self, ctx: &egui::Context) {
+        if !self.show_setup_modal {
+            return;
+        }
+
+        egui::Window::new("Configure AI")
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .show(ctx, |ui| {
+                ui.label(
+                    RichText::new("Select an AI provider and add your API key.")
+                        .color(TEXT_PRIMARY)
+                        .size(14.0),
+                );
+                ui.label(
+                    RichText::new("Stored only in your local .env.local file.")
+                        .color(TEXT_SECONDARY)
+                        .size(12.0),
+                );
+                ui.label(
+                    RichText::new(format!(
+                        "Path: {}",
+                        self.runtime_env.active_env_path.display()
+                    ))
+                    .color(TEXT_SECONDARY)
+                    .size(11.0),
+                );
+                ui.label(
+                    RichText::new(format!(
+                        "Primary path: {}",
+                        self.runtime_env.primary_env_path.display()
+                    ))
+                    .color(TEXT_SECONDARY)
+                    .size(11.0),
+                );
+
+                if self.runtime_env.is_using_fallback {
+                    ui.label(
+                        RichText::new(format!(
+                            "Fallback path: {}",
+                            self.runtime_env.fallback_env_path.display()
+                        ))
+                        .color(TEXT_SECONDARY)
+                        .size(11.0),
+                    );
+                    ui.label(
+                        RichText::new("Using fallback path because install folder is not writable.")
+                            .color(YELLOW)
+                            .size(11.0),
+                    );
+                }
+
+                if self.runtime_env.migrated_legacy_env {
+                    ui.label(
+                        RichText::new("Migrated provider values from legacy .env file.")
+                            .color(YELLOW)
+                            .size(11.0),
+                    );
+                }
+
+                ui.add_space(8.0);
+                egui::ComboBox::from_label("Provider")
+                    .selected_text(self.selected_provider.label())
+                    .show_ui(ui, |ui| {
+                        for provider in ProviderKind::ALL {
+                            ui.selectable_value(&mut self.selected_provider, provider, provider.label());
+                        }
+                    });
+
+                ui.add_space(6.0);
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.api_key_input)
+                        .hint_text("Paste API key")
+                        .password(true)
+                        .desired_width(360.0),
+                );
+
+                if let Some((message, is_error)) = &self.setup_feedback {
+                    let color = if *is_error { RED } else { ACCENT };
+                    ui.add_space(8.0);
+                    ui.label(RichText::new(message).color(color).size(12.0));
+                }
+
+                if self.restart_required {
+                    ui.add_space(8.0);
+                    ui.label(
+                        RichText::new("Restart required before the new key is used.")
+                            .color(YELLOW)
+                            .size(12.0),
+                    );
+                }
+
+                ui.add_space(10.0);
+                ui.horizontal(|ui| {
+                    if ui.button("Save").clicked() {
+                        self.save_provider_setup();
+                    }
+                    if ui.button("Skip").clicked() {
+                        self.show_setup_modal = false;
+                        self.api_key_input.clear();
+                    }
+                });
+
+                if self.restart_required {
+                    ui.add_space(6.0);
+                    ui.horizontal(|ui| {
+                        if ui.button("Exit now").clicked() {
+                            self.status = ServerStatus::Stopped;
+                            self.shutdown_flag.store(true, Ordering::SeqCst);
+                        }
+                        if ui.button("Later").clicked() {
+                            self.show_setup_modal = false;
+                        }
+                    });
+                }
+            });
     }
 
     fn hide_to_tray(&mut self, ctx: &egui::Context) {
@@ -114,11 +296,19 @@ impl BridoApp {
     fn handle_action(&mut self, action: ControlAction, ctx: &egui::Context) {
         match action {
             ControlAction::Restart => {
+                if let Err(err) = config::load_runtime_env(&self.runtime_env) {
+                    self.setup_feedback = Some((
+                        format!("Failed to reload env config before restart: {}", err),
+                        true,
+                    ));
+                }
+
                 self.status = ServerStatus::Starting;
                 // Shut down the old server gracefully
                 self.axum_handle.shutdown();
                 // Create a new config (generates a new PIN)
                 let new_config = crate::config::Config::default();
+                self.provider_configured = new_config.has_any_provider_key();
                 self.pin = new_config.pin.clone();
                 let new_ip = local_ip_address::local_ip()
                     .map(|ip| ip.to_string())
@@ -135,6 +325,11 @@ impl BridoApp {
                 self.qr_payload = format!("brido://{}:{}:{}", self.ip, self.port, self.pin);
                 self.qr_texture = None;
                 self.header.reset();
+                self.restart_required = false;
+            }
+            ControlAction::ConfigureAi => {
+                self.show_setup_modal = true;
+                self.setup_feedback = None;
             }
             ControlAction::StopServer => {
                 self.status = ServerStatus::Stopped;
@@ -314,6 +509,34 @@ impl eframe::App for BridoApp {
 
                 ui.add_space(16.0);
 
+                if self.restart_required {
+                    egui::Frame::new()
+                        .fill(SURFACE)
+                        .corner_radius(CornerRadius::same(12))
+                        .inner_margin(egui::Margin::same(14))
+                        .show(ui, |ui| {
+                            ui.label(
+                                RichText::new("Configuration saved. Restart required to use the new key.")
+                                    .color(YELLOW)
+                                    .size(12.0),
+                            );
+                        });
+                    ui.add_space(12.0);
+                } else if !self.provider_configured {
+                    egui::Frame::new()
+                        .fill(SURFACE)
+                        .corner_radius(CornerRadius::same(12))
+                        .inner_margin(egui::Margin::same(14))
+                        .show(ui, |ui| {
+                            ui.label(
+                                RichText::new("No AI provider key is configured yet. Use Configure AI.")
+                                    .color(YELLOW)
+                                    .size(12.0),
+                            );
+                        });
+                    ui.add_space(12.0);
+                }
+
                 // ── QR Code Panel ────────────────────────────────────
                 egui::Frame::new()
                     .fill(SURFACE)
@@ -371,11 +594,15 @@ impl eframe::App for BridoApp {
 
                 ui.add_space(8.0);
 
-                // Row of 3 smaller buttons
+                // Row of 4 smaller buttons
                 ui.horizontal(|ui| {
                     let btn_height = 36.0;
                     let spacing = ui.spacing().item_spacing.x;
-                    let btn_width = (avail_w - spacing * 2.0) / 3.0;
+                    let btn_width = (avail_w - spacing * 3.0) / 4.0;
+
+                    if make_btn(ui, "configure ai", ACCENT, btn_width, btn_height) {
+                        action = Some(ControlAction::ConfigureAi);
+                    }
 
                     if make_btn(ui, "stop server", TEXT_PRIMARY, btn_width, btn_height) {
                         action = Some(ControlAction::StopServer);
@@ -392,6 +619,8 @@ impl eframe::App for BridoApp {
                     self.handle_action(a, ctx);
                 }
             });
+
+        self.render_setup_modal(ctx);
 
         // If shutdown was requested, close the window
         if self.shutdown_flag.load(Ordering::SeqCst) {

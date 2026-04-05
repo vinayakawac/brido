@@ -106,6 +106,20 @@ cd brido_app
 ./gradlew lint
 ```
 
+## Release Artifacts
+
+The GitHub release workflow publishes APK artifacts on `v*` tags:
+
+- `brido-android-debug-<tag>.apk` is always generated.
+- `brido-android-release-<tag>.apk` is generated only when Android signing secrets are configured in GitHub.
+
+Signing secret names expected by CI:
+
+- `ANDROID_KEYSTORE_BASE64`
+- `ANDROID_KEYSTORE_PASSWORD`
+- `ANDROID_KEY_ALIAS`
+- `ANDROID_KEY_PASSWORD`
+
 ---
 
 ## Requirements

@@ -1,0 +1,134 @@
+name: Release Artifacts
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-server:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: brido_server -> target
+
+      - name: Package server artifacts
+        shell: pwsh
+        run: |
+          ./scripts/package_server_release.ps1 -Tag "${{ github.ref_name }}" -OutputDir "release_assets/server"
+
+      - name: Upload server artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: server-assets
+          path: release_assets/server/*
+
+  build-android:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Gradle cache
+        uses: gradle/actions/setup-gradle@v3
+
+      - name: Build debug APK
+        working-directory: brido_app
+        run: ./gradlew :app:assembleDebug
+
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-debug-apk
+          path: brido_app/app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Decode Android signing keystore
+        if: secrets.ANDROID_KEYSTORE_BASE64 != '' && secrets.ANDROID_KEYSTORE_PASSWORD != '' && secrets.ANDROID_KEY_ALIAS != '' && secrets.ANDROID_KEY_PASSWORD != ''
+        run: |
+          echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 --decode > "$RUNNER_TEMP/brido-release.keystore"
+
+      - name: Build signed release APK
+        if: secrets.ANDROID_KEYSTORE_BASE64 != '' && secrets.ANDROID_KEYSTORE_PASSWORD != '' && secrets.ANDROID_KEY_ALIAS != '' && secrets.ANDROID_KEY_PASSWORD != ''
+        working-directory: brido_app
+        run: |
+          ./gradlew :app:assembleRelease \
+            -Pandroid.injected.signing.store.file="$RUNNER_TEMP/brido-release.keystore" \
+            -Pandroid.injected.signing.store.password="${{ secrets.ANDROID_KEYSTORE_PASSWORD }}" \
+            -Pandroid.injected.signing.key.alias="${{ secrets.ANDROID_KEY_ALIAS }}" \
+            -Pandroid.injected.signing.key.password="${{ secrets.ANDROID_KEY_PASSWORD }}"
+
+      - name: Upload signed release APK
+        if: secrets.ANDROID_KEYSTORE_BASE64 != '' && secrets.ANDROID_KEYSTORE_PASSWORD != '' && secrets.ANDROID_KEY_ALIAS != '' && secrets.ANDROID_KEY_PASSWORD != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-release-apk
+          path: brido_app/app/build/outputs/apk/release/app-release.apk
+
+      - name: Note release APK skip
+        if: (!(secrets.ANDROID_KEYSTORE_BASE64 != '' && secrets.ANDROID_KEYSTORE_PASSWORD != '' && secrets.ANDROID_KEY_ALIAS != '' && secrets.ANDROID_KEY_PASSWORD != ''))
+        run: echo "Release APK build skipped because Android signing secrets are not configured."
+
+  publish-release:
+    runs-on: ubuntu-latest
+    needs:
+      - build-server
+      - build-android
+
+    steps:
+      - name: Download server artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: server-assets
+          path: release_assets/server
+
+      - name: Download debug APK artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: android-debug-apk
+          path: release_assets/android-debug
+
+      - name: Download release APK artifact (if available)
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: android-release-apk
+          path: release_assets/android-release
+
+      - name: Rename Android artifacts with tag
+        run: |
+          tag="${{ github.ref_name }}"
+          mkdir -p release_assets/android
+          if [ -f "release_assets/android-debug/app-debug.apk" ]; then
+            cp "release_assets/android-debug/app-debug.apk" "release_assets/android/brido-android-debug-${tag}.apk"
+          fi
+          if [ -f "release_assets/android-release/app-release.apk" ]; then
+            cp "release_assets/android-release/app-release.apk" "release_assets/android/brido-android-release-${tag}.apk"
+          fi
+
+      - name: Publish GitHub release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          fail_on_unmatched_files: false
+          files: |
+            release_assets/server/*
+            release_assets/android/*.apk
