@@ -24,10 +24,23 @@ jobs:
         with:
           workspaces: brido_server -> target
 
+      - name: Build server EXE
+        working-directory: brido_server
+        run: cargo build --release
+
       - name: Package server artifacts
         shell: pwsh
         run: |
-          ./scripts/package_server_release.ps1 -Tag "${{ github.ref_name }}" -OutputDir "release_assets/server"
+          ./scripts/package_server_release.ps1 -Tag "${{ github.ref_name }}" -OutputDir "release_assets/server" -SkipBuild
+
+      - name: Verify server artifacts
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $out = "release_assets/server"
+          if (!(Test-Path "$out/brido-server-$tag.exe")) { throw "Missing EXE artifact" }
+          if (!(Test-Path "$out/brido-server-$tag-bundle.zip")) { throw "Missing ZIP artifact" }
+          if (!(Test-Path "$out/brido-server-$tag.sha256")) { throw "Missing checksum artifact" }
 
       - name: Upload server artifacts
         uses: actions/upload-artifact@v4
@@ -50,6 +63,9 @@ jobs:
 
       - name: Setup Gradle cache
         uses: gradle/actions/setup-gradle@v3
+
+      - name: Make Gradle wrapper executable
+        run: chmod +x brido_app/gradlew
 
       - name: Build debug APK
         working-directory: brido_app

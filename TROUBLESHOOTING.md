@@ -174,7 +174,50 @@ Server packaging depends on:
 - `brido_server/.env.local.template`
 - release build output at `brido_server/target/release/brido-server.exe`
 
+Expected server assets in GitHub Release:
+
+- `brido-server-<tag>.exe` (standalone executable)
+- `brido-server-<tag>-bundle.zip` (exe + template + README)
+- `brido-server-<tag>.sha256`
+
+If only ZIP appears, check `build-server` job logs for `Verify server artifacts` failure and confirm the EXE file exists before upload.
+
 ## Local build and packaging
+
+### Build standalone EXE locally
+
+```powershell
+cd brido_server
+cargo build --release
+```
+
+Output:
+
+- `brido_server/target/release/brido-server.exe`
+
+### Build APK locally
+
+Debug APK:
+
+```powershell
+cd brido_app
+.\gradlew.bat :app:assembleDebug
+```
+
+Output:
+
+- `brido_app/app/build/outputs/apk/debug/app-debug.apk`
+
+Release APK (requires signing):
+
+```powershell
+cd brido_app
+.\gradlew.bat :app:assembleRelease
+```
+
+Output:
+
+- `brido_app/app/build/outputs/apk/release/app-release.apk`
 
 ### Packaging script fails locally
 
