@@ -53,7 +53,7 @@ You can also start from `brido_server/.env.local.template`.
 | OpenAI | `OPENAI_API_KEY` | `OPENAI_BASE_URL` | `OPENAI_MODEL` | `gpt-4.1-mini` |
 | Anthropic | `ANTHROPIC_API_KEY` | `ANTHROPIC_BASE_URL` | `ANTHROPIC_MODEL` | `claude-3-5-sonnet-latest` |
 | Gemini | `GEMINI_API_KEY` | `GEMINI_BASE_URL` | `GEMINI_MODEL` | `gemini-2.0-flash` |
-| OpenRouter | `OPENROUTER_API_KEY` | `OPENROUTER_BASE_URL` | `OPENROUTER_MODEL` | `google/gemini-2.5-flash` |
+| OpenRouter | `OPENROUTER_API_KEY` | `OPENROUTER_BASE_URL` | `OPENROUTER_MODEL` | `qwen/qwen3.6-plus:free` |
 
 Provider selection priority in code is:
 
