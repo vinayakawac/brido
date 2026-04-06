@@ -5,6 +5,9 @@ on:
     tags:
       - "v*"
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 permissions:
   contents: write
 
@@ -23,10 +26,28 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: brido_server -> target
+          cache-targets: false
 
       - name: Build server EXE
+        shell: pwsh
         working-directory: brido_server
-        run: cargo build --release
+        run: |
+          $ErrorActionPreference = "Stop"
+          $maxAttempts = 2
+          for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
+            Write-Host "cargo build --release --verbose (attempt $attempt/$maxAttempts)"
+            cargo build --release --verbose
+            if ($LASTEXITCODE -eq 0) {
+              break
+            }
+
+            if ($attempt -eq $maxAttempts) {
+              throw "Server release build failed after $maxAttempts attempts."
+            }
+
+            Write-Warning "Build attempt failed; cleaning target directory before retry."
+            cargo clean
+          }
 
       - name: Package server artifacts
         shell: pwsh
@@ -62,7 +83,9 @@ jobs:
           java-version: "17"
 
       - name: Setup Gradle cache
-        uses: gradle/actions/setup-gradle@v3
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-disabled: true
 
       - name: Make Gradle wrapper executable
         run: chmod +x brido_app/gradlew
