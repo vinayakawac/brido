@@ -121,14 +121,8 @@ impl TrayIconManager {
 }
 
 pub fn load_default_icon_rgba() -> (Vec<u8>, u32, u32) {
-    let ico_bytes = include_bytes!("../../brido.ico");
-    if let Ok(img) = image::load_from_memory_with_format(ico_bytes, image::ImageFormat::Ico) {
-        let rgba = img.into_rgba8();
-        let (w, h) = rgba.dimensions();
-        return (rgba.into_raw(), w, h);
-    }
-
-    let png_bytes = include_bytes!("../../brido.png");
+    // Keep compile-time asset loading on a tracked file so CI builds are deterministic.
+    let png_bytes = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../brido.png"));
     if let Ok(img) = image::load_from_memory_with_format(png_bytes, image::ImageFormat::Png) {
         let rgba = img.into_rgba8();
         let (w, h) = rgba.dimensions();
