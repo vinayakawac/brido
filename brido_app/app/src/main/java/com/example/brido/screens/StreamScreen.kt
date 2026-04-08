@@ -284,6 +284,8 @@ private val bulletPattern = Regex("^(\\s*)[-*+]\\s+(.*)")
 private val numberedPattern = Regex("^(\\s*)(\\d+)\\.\\s+(.*)")
 private val blockquotePattern = Regex("^>\\s?(.*)")
 private val modelTagPattern = Regex("^\\[.+]$")
+private val questionLinePattern = Regex("^\\s*Question\\s*:\\s+.*$", RegexOption.IGNORE_CASE)
+private val answerLinePattern = Regex("^\\s*Answer\\s*:\\s+.*$", RegexOption.IGNORE_CASE)
 
 private fun parseMarkdown(block: String): AnnotatedString {
     val lines = block.lines()
@@ -291,6 +293,12 @@ private fun parseMarkdown(block: String): AnnotatedString {
         var i = 0
         while (i < lines.size) {
             val line = lines[i]
+
+            // Hide Question: lines from terminal output
+            if (questionLinePattern.matches(line)) {
+                i++
+                continue
+            }
 
             // ── Fenced code block ───────────────────────────────────
 
@@ -322,6 +330,15 @@ private fun parseMarkdown(block: String): AnnotatedString {
             // ── Model tag [model-name] ──────────────────────────────
             if (modelTagPattern.matches(line)) {
                 withStyle(SpanStyle(fontWeight = FontWeight.Bold, color = BridoAccent)) {
+                    append(line)
+                }
+                i++
+                continue
+            }
+
+            // ── Answer line (high-priority visual cue) ───────────────
+            if (answerLinePattern.matches(line)) {
+                withStyle(SpanStyle(fontWeight = FontWeight.Bold, color = Color(0xFF00E5FF))) {
                     append(line)
                 }
                 i++
