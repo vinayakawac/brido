@@ -2,13 +2,9 @@ package com.example.brido.screens
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -22,11 +18,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.CheckBox
 import androidx.compose.material.icons.filled.CheckBoxOutlineBlank
-import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.Keyboard
-import androidx.compose.material.icons.filled.Storage
-import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -54,16 +47,13 @@ import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.brido.models.ServerInfo
 import com.example.brido.ui.theme.BridoAccent
 import com.example.brido.ui.theme.BridoDark
-import com.example.brido.ui.theme.BridoInfoBlue
 import com.example.brido.ui.theme.BridoSurface
 import com.example.brido.ui.theme.BridoSurfaceVariant
 import com.example.brido.ui.theme.BridoTextPrimary
@@ -272,7 +262,7 @@ private fun ManualEntryTab(
         // ── Info Card ────────────────────────────────────────────────────
         Card(
             modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = BridoInfoBlue),
+            colors = CardDefaults.cardColors(containerColor = BridoSurface),
             shape = RoundedCornerShape(12.dp),
         ) {
             Row(
@@ -282,21 +272,21 @@ private fun ManualEntryTab(
                 Icon(
                     Icons.Default.Info,
                     contentDescription = null,
-                    tint = Color.White.copy(alpha = 0.8f),
+                    tint = BridoTextSecondary,
                     modifier = Modifier.size(20.dp),
                 )
                 Spacer(Modifier.width(12.dp))
                 Column {
                     Text(
                         "Connection Info:",
-                        color = Color.White,
+                        color = BridoTextPrimary,
                         fontWeight = FontWeight.SemiBold,
                         fontSize = 14.sp,
                     )
                     Spacer(Modifier.height(4.dp))
                     Text(
                         "Find the IP address and PIN on your PC's Brido Server window.",
-                        color = Color.White.copy(alpha = 0.85f),
+                        color = BridoTextSecondary,
                         fontSize = 13.sp,
                     )
                 }
@@ -332,99 +322,6 @@ private fun ManualEntryTab(
             )
         }
 
-        // ── Hardware Info Cards ──────────────────────────────────────────
-        viewModel.serverInfo?.let { info ->
-            Spacer(Modifier.height(16.dp))
-            HardwareInfoPanel(info)
-        }
-
         Spacer(Modifier.height(24.dp))
-    }
-}
-
-@Composable
-private fun HardwareInfoPanel(info: ServerInfo) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(IntrinsicSize.Min),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        HardwareCard(
-            modifier = Modifier.weight(1f).fillMaxHeight(),
-            icon = Icons.Default.Storage,
-            label = "Storage",
-            value = info.storage,
-            detail = info.storageUsed,
-        )
-        HardwareCard(
-            modifier = Modifier.weight(1f).fillMaxHeight(),
-            icon = Icons.Default.GraphicEq,
-            label = "Graphics Card",
-            value = info.gpu,
-            detail = info.gpuDetail,
-        )
-    }
-    Spacer(Modifier.height(8.dp))
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(IntrinsicSize.Min),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        HardwareCard(
-            modifier = Modifier.weight(1f).fillMaxHeight(),
-            icon = Icons.Default.Memory,
-            label = "Installed RAM",
-            value = info.ram,
-            detail = info.ramSpeed,
-        )
-        HardwareCard(
-            modifier = Modifier.weight(1f).fillMaxHeight(),
-            icon = Icons.Default.Memory,
-            label = "Processor",
-            value = info.processor,
-            detail = info.processorSpeed,
-        )
-    }
-}
-
-@Composable
-private fun HardwareCard(
-    modifier: Modifier = Modifier,
-    icon: ImageVector,
-    label: String,
-    value: String,
-    detail: String,
-) {
-    Card(
-        modifier = modifier,
-        colors = CardDefaults.cardColors(containerColor = BridoSurface),
-        shape = RoundedCornerShape(8.dp),
-    ) {
-        Column(modifier = Modifier.padding(12.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(
-                    icon,
-                    contentDescription = null,
-                    tint = BridoTextSecondary,
-                    modifier = Modifier.size(14.dp),
-                )
-                Spacer(Modifier.width(4.dp))
-                Text(label, color = BridoTextSecondary, fontSize = 11.sp)
-            }
-            Spacer(Modifier.height(6.dp))
-            Text(
-                value,
-                color = BridoTextPrimary,
-                fontWeight = FontWeight.Bold,
-                fontSize = 14.sp,
-                maxLines = 2,
-            )
-            if (detail.isNotBlank()) {
-                Spacer(Modifier.height(2.dp))
-                Text(detail, color = BridoTextSecondary, fontSize = 10.sp, maxLines = 2)
-            }
-        }
     }
 }
