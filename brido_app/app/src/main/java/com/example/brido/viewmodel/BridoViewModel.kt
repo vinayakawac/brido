@@ -193,16 +193,12 @@ class BridoViewModel : ViewModel() {
                     )
                 }
 
-                val presets = listOf(1024 to 80, 768 to 65)
+                val presets = listOf(1440 to 88, 1024 to 80, 768 to 65)
                 var response: AnalyseResponse? = null
                 var lastError: Exception? = null
 
                 for ((index, preset) in presets.withIndex()) {
                     val (maxWidth, quality) = preset
-                    if (index == 0) {
-                        terminalLines.add("> using ${maxWidth}px / q$quality")
-                    }
-
                     try {
                         response = runAnalyse(maxWidth, quality)
                         break
