@@ -1,13 +1,14 @@
 # ── Rust ─────────────────────────────────────────────────────────────────────
 brido_server/target/
 brido_server/**/*.rs.bk
-Cargo.lock
 
 # ── Android / Gradle ─────────────────────────────────────────────────────────
 brido_app/.gradle/
 brido_app/local.properties
 brido_app/build/
 brido_app/app/build/
+brido_app/.externalNativeBuild/
+brido_app/.cxx/
 brido_app/**/*.apk
 brido_app/**/*.aab
 brido_app/**/*.ap_
@@ -33,16 +34,28 @@ desktop.ini
 *.swo
 *~
 
-# ── Docs (ignore all .md except README and models) ───────────────────────────
+# ── Docs (selective markdown tracking) ───────────────────────────────────────
 *.md
-!README.md
-!troubleshooting.md
-!models.md
+!/README.md
+!/TROUBLESHOOTING.md
+!/brido_app/README.md
+!/brido_server/README.md
+!/release_assets/server/README-server.md
+*draft*.md
+*scratch*.md
 
 # ── Misc ─────────────────────────────────────────────────────────────────────
 *.ico
 *.png
 !brido.png
+
+# ── Security / local keys ───────────────────────────────────────────────────
+*.jks
+*.keystore
+
+# ── Caches / logs ────────────────────────────────────────────────────────────
+.kotlin/
+*.log
 
 # ── Secrets ──────────────────────────────────────────────────────────────────
 brido_server/.env
@@ -50,5 +63,9 @@ brido_server/.env.local
 brido_server/.env.local.*
 !brido_server/.env.local.template
 
-# ── Local release outputs ────────────────────────────────────────────────────
-release_assets/
+# ── Local release outputs (artifact-only) ───────────────────────────────────
+release_assets/**/*.apk
+release_assets/**/*.aab
+release_assets/**/*.exe
+release_assets/**/*.zip
+release_assets/**/*.sha256
