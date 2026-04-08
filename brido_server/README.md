@@ -148,6 +148,16 @@ Base URL: `https://<SERVER_IP>:8080`
 |---------|-------|
 | App cannot connect | Same Wi-Fi, firewall rules, server is running |
 | `401 Unauthorized` | PIN mismatch or missing/invalid token |
-| Analyse fails | Provider API key missing or provider endpoint error |
+| Analyse fails | Check structured error `code` and `hint` in response body; use `request_id` for log correlation |
 | No model list | No provider keys configured |
 | Window not visible | Use tray menu `Open` or double-click tray icon |
+
+Common `/api/analyse` codes:
+
+- `image_payload_empty`: capture/frame issue on client.
+- `image_payload_too_large`: reduce frame size/quality.
+- `model_unsupported_image_input`: chosen model cannot process images (common on some OpenRouter models).
+- `provider_auth_failed`: invalid provider key or endpoint config.
+- `provider_rate_limited`: wait or switch provider.
+- `provider_timeout`: upstream timeout; retry or switch provider.
+- `all_providers_failed`: all configured providers failed; inspect `attempts` list in error payload.

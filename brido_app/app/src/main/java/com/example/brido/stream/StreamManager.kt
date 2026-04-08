@@ -54,11 +54,18 @@ class StreamManager(
             }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                onDisconnected(t.message ?: "Connection failed")
+                val responseCode = response?.code
+                val detail = if (responseCode != null) {
+                    "${t.message ?: "Connection failed"} (http $responseCode)"
+                } else {
+                    t.message ?: "Connection failed"
+                }
+                onDisconnected(detail)
             }
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-                onDisconnected(reason)
+                val detail = if (reason.isBlank()) "code=$code" else "code=$code reason=$reason"
+                onDisconnected(detail)
             }
         })
     }

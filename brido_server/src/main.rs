@@ -121,12 +121,16 @@ pub fn start_server(
             });
 
             let connected_count_clone = count_clone;
+            let http_client = reqwest::Client::builder()
+                .timeout(Duration::from_secs(30))
+                .build()
+                .expect("Failed to create HTTP client");
 
             let state = Arc::new(AppState {
                 config,
                 frame_tx,
                 active_tokens: RwLock::new(HashSet::new()),
-                http_client: reqwest::Client::new(),
+                http_client,
                 analysis_gate: Semaphore::new(1),
                 connected_count: connected_count_clone,
                 _keep_alive_rx: keep_alive_rx,

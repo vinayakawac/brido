@@ -52,7 +52,11 @@ async fn handle_stream(socket: WebSocket, state: Arc<AppState>) {
                 }
             }
             Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
-                tracing::debug!("Stream client lagged by {} frames, skipping", n);
+                if n >= 5 {
+                    tracing::warn!("Stream client lagged by {} frames, skipping", n);
+                } else {
+                    tracing::debug!("Stream client lagged by {} frames, skipping", n);
+                }
                 continue;
             }
             Err(_) => break,
