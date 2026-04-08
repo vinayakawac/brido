@@ -233,10 +233,16 @@ private fun TerminalPanel(
             ) {
                 items(lines) { block ->
                     if (block.startsWith(">")) {
-                        // Status lines (> analysing frame...) — green, plain
+                        val statusColor = when {
+                            block.startsWith("> error:", ignoreCase = true) -> Color(0xFFFF6B6B)
+                            block.startsWith("> hint:", ignoreCase = true) -> Color(0xFFFFD166)
+                            else -> Color(0xFF4CAF50)
+                        }
+
+                        // Status and diagnostic lines
                         Text(
                             text = block,
-                            color = Color(0xFF4CAF50),
+                            color = statusColor,
                             fontFamily = FontFamily.Monospace,
                             fontSize = 13.sp,
                             lineHeight = 18.sp,

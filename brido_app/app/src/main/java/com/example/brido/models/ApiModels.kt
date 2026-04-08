@@ -39,3 +39,21 @@ data class AnalyseResponse(
     val result: String,
     @SerializedName("model_used") val modelUsed: String,
 )
+
+data class ProviderAttemptInfo(
+    val provider: String? = null,
+    val model: String? = null,
+    val code: String? = null,
+    val message: String? = null,
+)
+
+data class ApiError(
+    val code: String? = null,
+    val message: String? = null,
+    val retryable: Boolean? = null,
+    val hint: String? = null,
+    val provider: String? = null,
+    val model: String? = null,
+    val attempts: List<ProviderAttemptInfo>? = null,
+    @SerializedName("request_id") val requestId: String? = null,
+)

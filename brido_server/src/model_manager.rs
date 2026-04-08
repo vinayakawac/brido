@@ -1,9 +1,94 @@
-use anyhow::{anyhow, Result};
+use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
 
 use crate::config::Config;
 
 const ANALYZE_PROMPT: &str = "Analyze this screenshot and follow this strict priority order:\n\n1) QUESTION ANSWERING (highest priority)\n- If the screen contains direct question(s) where answers can be provided from visible context, answer them first.\n- Use this format:\nQuestion: <short restatement>\nAnswer: <best direct answer>\nWhy: <1-3 short lines>\n\n2) QUIZ / MCQ\n- If it is a multiple-choice quiz, answer using:\nAnswer: <LETTER>. <FULL_OPTION_TEXT>\n\nExplanation:\n<2-4 short lines>\n\n3) CODING PROBLEM\n- If it is a coding task, return exactly one runnable code block only and no extra text.\n\n4) SCREEN DESCRIPTION (fallback only)\n- Only when none of the above apply, briefly describe what the screen is showing in 2-4 lines.\n\nGlobal rules:\n- Pick exactly one mode from the priority list.\n- Prefer helping with visible question content over generic description.\n- If text is not readable, state that briefly and ask for a clearer frame.\n- Keep output concise and actionable.";
+const MAX_ANALYZE_IMAGE_BASE64_BYTES: usize = 5 * 1024 * 1024;
+
+#[derive(Clone, Debug, Serialize)]
+pub struct ProviderAttempt {
+    pub provider: String,
+    pub model: String,
+    pub code: String,
+    pub message: String,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum AnalyseErrorCode {
+    ImagePayloadEmpty,
+    ImagePayloadTooLarge,
+    NoProviderConfigured,
+    ModelUnsupportedImageInput,
+    ProviderAuthFailed,
+    ProviderRateLimited,
+    ProviderTimeout,
+    ProviderUnavailable,
+    ProviderOutOfMemory,
+    NetworkError,
+    ProviderReturnedEmpty,
+    AllProvidersFailed,
+}
+
+impl AnalyseErrorCode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            AnalyseErrorCode::ImagePayloadEmpty => "image_payload_empty",
+            AnalyseErrorCode::ImagePayloadTooLarge => "image_payload_too_large",
+            AnalyseErrorCode::NoProviderConfigured => "no_provider_configured",
+            AnalyseErrorCode::ModelUnsupportedImageInput => "model_unsupported_image_input",
+            AnalyseErrorCode::ProviderAuthFailed => "provider_auth_failed",
+            AnalyseErrorCode::ProviderRateLimited => "provider_rate_limited",
+            AnalyseErrorCode::ProviderTimeout => "provider_timeout",
+            AnalyseErrorCode::ProviderUnavailable => "provider_unavailable",
+            AnalyseErrorCode::ProviderOutOfMemory => "provider_out_of_memory",
+            AnalyseErrorCode::NetworkError => "network_error",
+            AnalyseErrorCode::ProviderReturnedEmpty => "provider_returned_empty",
+            AnalyseErrorCode::AllProvidersFailed => "all_providers_failed",
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct AnalyseError {
+    pub code: AnalyseErrorCode,
+    pub message: String,
+    pub retryable: bool,
+    pub hint: Option<String>,
+    pub provider: Option<String>,
+    pub model: Option<String>,
+    pub attempts: Vec<ProviderAttempt>,
+}
+
+impl AnalyseError {
+    fn new(code: AnalyseErrorCode, message: impl Into<String>, retryable: bool) -> Self {
+        Self {
+            code,
+            message: message.into(),
+            retryable,
+            hint: None,
+            provider: None,
+            model: None,
+            attempts: Vec::new(),
+        }
+    }
+
+    fn with_hint(mut self, hint: impl Into<String>) -> Self {
+        self.hint = Some(hint.into());
+        self
+    }
+
+    fn with_provider(mut self, provider: &str, model: &str) -> Self {
+        self.provider = Some(provider.to_string());
+        self.model = Some(model.to_string());
+        self
+    }
+
+    fn with_attempts(mut self, attempts: Vec<ProviderAttempt>) -> Self {
+        self.attempts = attempts;
+        self
+    }
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum ProviderKind {
@@ -141,16 +226,44 @@ impl<'a> ModelManager<'a> {
         image_base64: &str,
         requested_model: Option<&str>,
         custom_prompt: Option<&str>,
-    ) -> Result<(String, String)> {
+    ) -> std::result::Result<(String, String), AnalyseError> {
         let image_base64 = normalize_image_base64(image_base64);
         if image_base64.is_empty() {
-            return Err(anyhow!("Image payload is empty"));
+            return Err(
+                AnalyseError::new(
+                    AnalyseErrorCode::ImagePayloadEmpty,
+                    "Image payload is empty.",
+                    false,
+                )
+                .with_hint("Capture a frame first, then try analysing again."),
+            );
+        }
+
+        if image_base64.len() > MAX_ANALYZE_IMAGE_BASE64_BYTES {
+            return Err(
+                AnalyseError::new(
+                    AnalyseErrorCode::ImagePayloadTooLarge,
+                    format!(
+                        "Image payload too large ({} bytes).",
+                        image_base64.len()
+                    ),
+                    true,
+                )
+                .with_hint("Use a smaller frame or lower JPEG quality and retry."),
+            );
         }
 
         if self.providers.is_empty() {
-            return Err(anyhow!(
-                "No AI provider configured. Set one of: OPENAI_API_KEY, ANTHROPIC_API_KEY, GEMINI_API_KEY, OPENROUTER_API_KEY"
-            ));
+            return Err(
+                AnalyseError::new(
+                    AnalyseErrorCode::NoProviderConfigured,
+                    "No AI provider configured.",
+                    false,
+                )
+                .with_hint(
+                    "Set one of OPENAI_API_KEY, ANTHROPIC_API_KEY, GEMINI_API_KEY, or OPENROUTER_API_KEY and restart server.",
+                ),
+            );
         }
 
         let mut candidate_providers = self.providers.clone();
@@ -166,7 +279,8 @@ impl<'a> ModelManager<'a> {
         }
 
         let prompt = merge_prompt(custom_prompt);
-        let mut last_error: Option<anyhow::Error> = None;
+        let mut last_error: Option<AnalyseError> = None;
+        let mut attempts: Vec<ProviderAttempt> = Vec::new();
 
         for provider in candidate_providers {
             let attempt = self
@@ -179,22 +293,63 @@ impl<'a> ModelManager<'a> {
                     return Ok((result.trim().to_string(), model_used));
                 }
                 Ok(_) => {
-                    last_error = Some(anyhow!(
-                        "{} returned an empty response",
-                        provider.kind.as_str()
-                    ));
+                    let err = AnalyseError::new(
+                        AnalyseErrorCode::ProviderReturnedEmpty,
+                        format!("{} returned an empty response", provider.kind.as_str()),
+                        true,
+                    )
+                    .with_provider(provider.kind.as_str(), &provider.model)
+                    .with_hint("Try again or switch to another provider/model.");
+
+                    attempts.push(ProviderAttempt {
+                        provider: provider.kind.as_str().to_string(),
+                        model: provider.model.clone(),
+                        code: err.code.as_str().to_string(),
+                        message: err.message.clone(),
+                    });
+                    last_error = Some(err);
                 }
                 Err(err) => {
-                    last_error = Some(anyhow!(
-                        "{} failed: {}",
-                        provider.kind.as_str(),
-                        err
-                    ));
+                    attempts.push(ProviderAttempt {
+                        provider: provider.kind.as_str().to_string(),
+                        model: provider.model.clone(),
+                        code: err.code.as_str().to_string(),
+                        message: err.message.clone(),
+                    });
+                    last_error = Some(err);
                 }
             }
         }
 
-        Err(last_error.unwrap_or_else(|| anyhow!("All providers failed")))
+        if attempts
+            .iter()
+            .all(|attempt| attempt.code == AnalyseErrorCode::ModelUnsupportedImageInput.as_str())
+        {
+            return Err(
+                AnalyseError::new(
+                    AnalyseErrorCode::ModelUnsupportedImageInput,
+                    "No configured provider/model currently supports image input for this request.",
+                    false,
+                )
+                .with_hint("Select a vision-capable model or configure another provider.")
+                .with_attempts(attempts),
+            );
+        }
+
+        let fallback_msg = last_error
+            .as_ref()
+            .map(|err| err.message.clone())
+            .unwrap_or_else(|| "All providers failed.".to_string());
+
+        Err(
+            AnalyseError::new(
+                AnalyseErrorCode::AllProvidersFailed,
+                format!("All providers failed. Last error: {}", fallback_msg),
+                true,
+            )
+            .with_hint("Check provider credentials, model capability, and network connectivity.")
+            .with_attempts(attempts),
+        )
     }
 
     async fn analyse_with_provider(
@@ -202,7 +357,7 @@ impl<'a> ModelManager<'a> {
         provider: &ProviderConfig,
         image_base64: &str,
         prompt: &str,
-    ) -> Result<String> {
+    ) -> std::result::Result<String, AnalyseError> {
         match provider.kind {
             ProviderKind::OpenAI => self.call_openai(provider, image_base64, prompt).await,
             ProviderKind::Anthropic => self.call_anthropic(provider, image_base64, prompt).await,
@@ -216,7 +371,7 @@ impl<'a> ModelManager<'a> {
         provider: &ProviderConfig,
         image_base64: &str,
         prompt: &str,
-    ) -> Result<String> {
+    ) -> std::result::Result<String, AnalyseError> {
         let url = format!("{}/chat/completions", trim_trailing_slash(&provider.base_url));
         let body = OpenAiChatRequest {
             model: provider.model.clone(),
@@ -243,15 +398,26 @@ impl<'a> ModelManager<'a> {
             .bearer_auth(&provider.api_key)
             .json(&body)
             .send()
-            .await?;
+            .await
+            .map_err(|err| classify_transport_error(provider, err))?;
 
         if !response.status().is_success() {
             let status = response.status();
             let error_text = response.text().await.unwrap_or_default();
-            return Err(anyhow!("OpenAI error {}: {}", status, error_text));
+            return Err(classify_http_error(provider, status, &error_text));
         }
 
-        let payload = response.json::<OpenAiChatResponse>().await?;
+        let payload = response
+            .json::<OpenAiChatResponse>()
+            .await
+            .map_err(|err| {
+                AnalyseError::new(
+                    AnalyseErrorCode::ProviderUnavailable,
+                    format!("Invalid OpenAI response: {}", err),
+                    true,
+                )
+                .with_provider(provider.kind.as_str(), &provider.model)
+            })?;
         let content = payload
             .choices
             .into_iter()
@@ -267,7 +433,7 @@ impl<'a> ModelManager<'a> {
         provider: &ProviderConfig,
         image_base64: &str,
         prompt: &str,
-    ) -> Result<String> {
+    ) -> std::result::Result<String, AnalyseError> {
         let url = format!("{}/chat/completions", trim_trailing_slash(&provider.base_url));
         let body = OpenAiChatRequest {
             model: provider.model.clone(),
@@ -296,15 +462,26 @@ impl<'a> ModelManager<'a> {
             .header("X-Title", "brido")
             .json(&body)
             .send()
-            .await?;
+            .await
+            .map_err(|err| classify_transport_error(provider, err))?;
 
         if !response.status().is_success() {
             let status = response.status();
             let error_text = response.text().await.unwrap_or_default();
-            return Err(anyhow!("OpenRouter error {}: {}", status, error_text));
+            return Err(classify_http_error(provider, status, &error_text));
         }
 
-        let payload = response.json::<OpenAiChatResponse>().await?;
+        let payload = response
+            .json::<OpenAiChatResponse>()
+            .await
+            .map_err(|err| {
+                AnalyseError::new(
+                    AnalyseErrorCode::ProviderUnavailable,
+                    format!("Invalid OpenRouter response: {}", err),
+                    true,
+                )
+                .with_provider(provider.kind.as_str(), &provider.model)
+            })?;
         let content = payload
             .choices
             .into_iter()
@@ -320,7 +497,7 @@ impl<'a> ModelManager<'a> {
         provider: &ProviderConfig,
         image_base64: &str,
         prompt: &str,
-    ) -> Result<String> {
+    ) -> std::result::Result<String, AnalyseError> {
         let url = format!("{}/messages", trim_trailing_slash(&provider.base_url));
         let body = AnthropicRequest {
             model: provider.model.clone(),
@@ -350,15 +527,26 @@ impl<'a> ModelManager<'a> {
             .header("anthropic-version", "2023-06-01")
             .json(&body)
             .send()
-            .await?;
+            .await
+            .map_err(|err| classify_transport_error(provider, err))?;
 
         if !response.status().is_success() {
             let status = response.status();
             let error_text = response.text().await.unwrap_or_default();
-            return Err(anyhow!("Anthropic error {}: {}", status, error_text));
+            return Err(classify_http_error(provider, status, &error_text));
         }
 
-        let payload = response.json::<AnthropicResponse>().await?;
+        let payload = response
+            .json::<AnthropicResponse>()
+            .await
+            .map_err(|err| {
+                AnalyseError::new(
+                    AnalyseErrorCode::ProviderUnavailable,
+                    format!("Invalid Anthropic response: {}", err),
+                    true,
+                )
+                .with_provider(provider.kind.as_str(), &provider.model)
+            })?;
         let content = payload
             .content
             .into_iter()
@@ -376,7 +564,7 @@ impl<'a> ModelManager<'a> {
         provider: &ProviderConfig,
         image_base64: &str,
         prompt: &str,
-    ) -> Result<String> {
+    ) -> std::result::Result<String, AnalyseError> {
         let url = format!(
             "{}/models/{}:generateContent?key={}",
             trim_trailing_slash(&provider.base_url),
@@ -406,15 +594,31 @@ impl<'a> ModelManager<'a> {
             },
         };
 
-        let response = self.client.post(url).json(&body).send().await?;
+        let response = self
+            .client
+            .post(url)
+            .json(&body)
+            .send()
+            .await
+            .map_err(|err| classify_transport_error(provider, err))?;
 
         if !response.status().is_success() {
             let status = response.status();
             let error_text = response.text().await.unwrap_or_default();
-            return Err(anyhow!("Gemini error {}: {}", status, error_text));
+            return Err(classify_http_error(provider, status, &error_text));
         }
 
-        let payload = response.json::<GeminiResponse>().await?;
+        let payload = response
+            .json::<GeminiResponse>()
+            .await
+            .map_err(|err| {
+                AnalyseError::new(
+                    AnalyseErrorCode::ProviderUnavailable,
+                    format!("Invalid Gemini response: {}", err),
+                    true,
+                )
+                .with_provider(provider.kind.as_str(), &provider.model)
+            })?;
 
         let content = payload
             .candidates
@@ -483,6 +687,104 @@ fn normalize_image_base64(raw: &str) -> String {
         .or_else(|| raw.trim().strip_prefix("data:image/png;base64,"))
         .unwrap_or(raw.trim())
         .to_string()
+}
+
+fn classify_transport_error(provider: &ProviderConfig, error: reqwest::Error) -> AnalyseError {
+    if error.is_timeout() {
+        return AnalyseError::new(
+            AnalyseErrorCode::ProviderTimeout,
+            format!("{} request timed out", provider.kind.as_str()),
+            true,
+        )
+        .with_provider(provider.kind.as_str(), &provider.model)
+        .with_hint("Retry in a few seconds or switch provider.");
+    }
+
+    AnalyseError::new(
+        AnalyseErrorCode::NetworkError,
+        format!("{} network error: {}", provider.kind.as_str(), error),
+        true,
+    )
+    .with_provider(provider.kind.as_str(), &provider.model)
+    .with_hint("Check internet access and provider endpoint configuration.")
+}
+
+fn classify_http_error(
+    provider: &ProviderConfig,
+    status: StatusCode,
+    error_text: &str,
+) -> AnalyseError {
+    let body_lower = error_text.to_lowercase();
+    let provider_name = provider.kind.as_str();
+
+    if provider.kind == ProviderKind::OpenRouter
+        && status == StatusCode::NOT_FOUND
+        && (body_lower.contains("support image input")
+            || body_lower.contains("no endpoints found"))
+    {
+        return AnalyseError::new(
+            AnalyseErrorCode::ModelUnsupportedImageInput,
+            format!(
+                "Model '{}' on {} does not support image input.",
+                provider.model, provider_name
+            ),
+            false,
+        )
+        .with_provider(provider_name, &provider.model)
+        .with_hint("Pick a vision-capable model/provider for screenshot analysis.");
+    }
+
+    if status == StatusCode::UNAUTHORIZED || status == StatusCode::FORBIDDEN {
+        return AnalyseError::new(
+            AnalyseErrorCode::ProviderAuthFailed,
+            format!("{} authentication failed", provider_name),
+            false,
+        )
+        .with_provider(provider_name, &provider.model)
+        .with_hint("Check API key and base URL in server configuration.");
+    }
+
+    if status == StatusCode::TOO_MANY_REQUESTS {
+        return AnalyseError::new(
+            AnalyseErrorCode::ProviderRateLimited,
+            format!("{} rate limit reached", provider_name),
+            true,
+        )
+        .with_provider(provider_name, &provider.model)
+        .with_hint("Wait briefly and retry, or switch provider.");
+    }
+
+    if status == StatusCode::REQUEST_TIMEOUT || status == StatusCode::GATEWAY_TIMEOUT {
+        return AnalyseError::new(
+            AnalyseErrorCode::ProviderTimeout,
+            format!("{} timed out", provider_name),
+            true,
+        )
+        .with_provider(provider_name, &provider.model)
+        .with_hint("Retry with a smaller frame or switch provider.");
+    }
+
+    if body_lower.contains("out of memory")
+        || body_lower.contains("insufficient memory")
+        || body_lower.contains("requires more system memory")
+    {
+        return AnalyseError::new(
+            AnalyseErrorCode::ProviderOutOfMemory,
+            format!("{} ran out of memory", provider_name),
+            true,
+        )
+        .with_provider(provider_name, &provider.model)
+        .with_hint("Retry later or reduce frame resolution/quality.");
+    }
+
+    let retryable = status.is_server_error();
+    AnalyseError::new(
+        AnalyseErrorCode::ProviderUnavailable,
+        format!("{} error {}: {}", provider_name, status.as_u16(), error_text),
+        retryable,
+    )
+    .with_provider(provider_name, &provider.model)
+    .with_hint("Check provider status and configuration.")
 }
 
 #[derive(Serialize)]

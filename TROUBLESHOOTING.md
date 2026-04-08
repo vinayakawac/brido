@@ -131,6 +131,58 @@ New-NetFirewallRule -DisplayName "Brido" -Direction Inbound -Protocol TCP -Local
 - Reduce system load on laptop.
 - Lower capture settings if needed.
 
+## Analysis endpoint troubleshooting (`POST /api/analyse`)
+
+When analysis fails, the app terminal now shows structured server error details.
+Use the `code`, `hint`, and `request_id` to diagnose quickly.
+
+### `HTTP 401` with code `unauthorized`
+
+- Token is missing or expired.
+- Disconnect and reconnect from the app to get a new token.
+
+### `HTTP 413` with code `image_payload_too_large`
+
+- Analysis image exceeded server payload limit.
+- Retry should automatically downgrade frame size once.
+- If it still fails:
+  - reduce client analysis size/quality,
+  - or lower server capture quality/target resolution.
+
+### `HTTP 422` with code `model_unsupported_image_input`
+
+- Selected model/provider does not support image input.
+- Common example: OpenRouter text-only model returns 404 upstream with message like
+  `No endpoints found that support image input`.
+- Switch to a vision-capable model/provider and retry.
+
+### `HTTP 429` with code `provider_rate_limited`
+
+- Upstream provider quota/rate limit was hit.
+- Wait and retry, or switch provider.
+
+### `HTTP 502` with codes `provider_auth_failed`, `provider_unavailable`, `network_error`, `all_providers_failed`
+
+- Check provider API key, base URL, and model name in `.env.local`.
+- Verify the server can reach provider endpoints from current network.
+- If using OpenRouter, verify chosen model supports images.
+
+### `HTTP 503` with codes `analysis_queue_unavailable`, `no_provider_configured`, `provider_out_of_memory`
+
+- Queue busy: wait and retry.
+- No provider configured: add at least one provider key and restart server.
+- Out of memory: retry with smaller frame or lower server capture settings.
+
+### `HTTP 504` with code `provider_timeout`
+
+- Provider did not answer within timeout.
+- Retry, then switch provider/model if repeated.
+
+### Use `request_id` for support/debugging
+
+- Every structured analysis error includes a `request_id`.
+- Include that value when reporting issues so server logs can be correlated.
+
 ## GitHub Releases and workflow
 
 ### Workflow error: `Unrecognized named-value: 'secrets'`
