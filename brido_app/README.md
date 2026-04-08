@@ -68,9 +68,9 @@ API calls:
 When `anAlyse` is pressed:
 
 1. Take latest frame from stream manager.
-2. Resize/compress frame to JPEG (first pass: width 1024, quality 80).
-3. Send `/api/analyse` with base64 image.
-4. If server returns 5xx, retry once with smaller image (width 768, quality 65).
+2. Resize/compress frame to JPEG using fallback presets: `(1440, 88)` → `(1024, 80)` → `(768, 65)`.
+3. Send `/api/analyse` with base64 image and default model hint `openrouter/free`.
+4. Retry with the next smaller preset on retryable failures (`413`, `429`, `502`, `503`, `504`, or generic `5xx`).
 5. Append server `result` text to terminal.
 
 Returned `model_used` is supplied by server and may vary by provider availability and request routing.
