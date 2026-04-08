@@ -110,10 +110,10 @@ impl ProviderKind {
 
     fn rank(self) -> u8 {
         match self {
-            ProviderKind::OpenAI => 100,
-            ProviderKind::Anthropic => 95,
-            ProviderKind::Gemini => 90,
-            ProviderKind::OpenRouter => 85,
+            ProviderKind::OpenRouter => 100,
+            ProviderKind::OpenAI => 95,
+            ProviderKind::Anthropic => 90,
+            ProviderKind::Gemini => 85,
         }
     }
 }
@@ -172,6 +172,15 @@ impl<'a> ModelManager<'a> {
     pub fn available_models(config: &Config) -> Vec<(String, String, String, f64)> {
         let mut entries = Vec::new();
 
+        if !config.openrouter_api_key.trim().is_empty() {
+            entries.push((
+                format!("openrouter:{}", config.openrouter_model),
+                config.openrouter_model.clone(),
+                "cloud gateway multi-model".to_string(),
+                8.5,
+            ));
+        }
+
         if !config.openai_api_key.trim().is_empty() {
             entries.push((
                 format!("openai:{}", config.openai_model),
@@ -196,15 +205,6 @@ impl<'a> ModelManager<'a> {
                 config.gemini_model.clone(),
                 "cloud vision+reasoning".to_string(),
                 9.0,
-            ));
-        }
-
-        if !config.openrouter_api_key.trim().is_empty() {
-            entries.push((
-                format!("openrouter:{}", config.openrouter_model),
-                config.openrouter_model.clone(),
-                "cloud gateway multi-model".to_string(),
-                8.5,
             ));
         }
 

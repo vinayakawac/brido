@@ -27,7 +27,7 @@ GEMINI_MODEL=gemini-2.0-flash\n\
 \n\
 OPENROUTER_API_KEY=\n\
 OPENROUTER_BASE_URL=https://openrouter.ai/api/v1\n\
-OPENROUTER_MODEL=qwen/qwen3.6-plus:free\n";
+OPENROUTER_MODEL=openrouter/free\n";
 
 const MANAGED_ENV_KEYS: [&str; 12] = [
     "OPENAI_API_KEY",
@@ -95,7 +95,7 @@ impl Default for Config {
             gemini_model: env_or_default("GEMINI_MODEL", "gemini-2.0-flash"),
             openrouter_api_key: env::var("OPENROUTER_API_KEY").unwrap_or_default(),
             openrouter_base_url: env_or_default("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"),
-            openrouter_model: env_or_default("OPENROUTER_MODEL", "qwen/qwen3.6-plus:free"),
+            openrouter_model: env_or_default("OPENROUTER_MODEL", "openrouter/free"),
         }
     }
 }
@@ -173,7 +173,7 @@ impl ProviderKind {
             ProviderKind::OpenAI => "gpt-4.1-mini",
             ProviderKind::Anthropic => "claude-3-5-sonnet-latest",
             ProviderKind::Gemini => "gemini-2.0-flash",
-            ProviderKind::OpenRouter => "qwen/qwen3.6-plus:free",
+            ProviderKind::OpenRouter => "openrouter/free",
         }
     }
 }
