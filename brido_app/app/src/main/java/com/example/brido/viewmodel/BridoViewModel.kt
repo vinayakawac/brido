@@ -29,6 +29,9 @@ import java.net.UnknownHostException
 import javax.net.ssl.SSLException
 
 class BridoViewModel : ViewModel() {
+    companion object {
+        private const val DEFAULT_ANALYSE_MODEL = "openrouter/free"
+    }
 
     // ── Connection state ─────────────────────────────────────────────────
     var serverIp by mutableStateOf("")
@@ -189,6 +192,7 @@ class BridoViewModel : ViewModel() {
                         token = "Bearer $token",
                         request = AnalyseRequest(
                             imageBase64 = imageBase64,
+                            model = DEFAULT_ANALYSE_MODEL,
                         ),
                     )
                 }
