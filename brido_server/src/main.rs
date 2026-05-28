@@ -2,6 +2,7 @@
 
 mod ai_server;
 mod capture;
+mod capture_gdi;
 mod config;
 mod encoder;
 mod model_manager;
@@ -23,7 +24,7 @@ use axum::{
 use tokio::sync::{broadcast, RwLock, Semaphore};
 use tower_http::cors::CorsLayer;
 
-use capture::ScreenCapture;
+use capture::{CaptureMethod, ScreenCapture};
 use config::Config;
 use encoder::FrameEncoder;
 use ui::window::BridoApp;
@@ -90,13 +91,17 @@ pub fn start_server(
 
             // Screen capture in a dedicated OS thread (scrap types are !Send)
             std::thread::spawn(move || {
-                let mut cap = match ScreenCapture::new() {
+                let capture_method = CaptureMethod::from_env();
+                tracing::info!("Capture method: {:?}", capture_method);
+
+                let mut cap = match ScreenCapture::new(capture_method) {
                     Ok(c) => c,
                     Err(e) => {
                         eprintln!("Screen capture init failed: {e}");
                         return;
                     }
                 };
+                tracing::info!("Active capture backend: {}", cap.backend_label());
 
                 let encoder = FrameEncoder::new(target_w, target_h, quality);
                 let interval = Duration::from_millis(1000 / fps as u64);
