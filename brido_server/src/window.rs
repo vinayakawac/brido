@@ -69,6 +69,16 @@ pub struct OverlayApp {
     settings_openrouter_key: String,
     settings_hotkey_capture: String,
     settings_hotkey_toggle: String,
+    settings_hotkey_settings: String,
+
+    show_password_openai: bool,
+    show_password_anthropic: bool,
+    show_password_gemini: bool,
+    show_password_openrouter: bool,
+    start_on_startup: bool,
+    minimize_to_tray: bool,
+    editing_hotkey: Option<String>,
+    hotkey_edit_buffer: String,
 
     // ── Phone Connection state ───────────────────────────────────────────
     ip: String,
@@ -106,8 +116,17 @@ impl OverlayApp {
             settings_anthropic_key: config.anthropic_api_key.clone(),
             settings_gemini_key: config.gemini_api_key.clone(),
             settings_openrouter_key: config.openrouter_api_key.clone(),
-            settings_hotkey_capture: config.overlay_hotkey_capture.clone(),
-            settings_hotkey_toggle: config.overlay_hotkey_toggle.clone(),
+            settings_hotkey_capture: strip_ctrl(&config.overlay_hotkey_capture),
+            settings_hotkey_toggle: strip_ctrl(&config.overlay_hotkey_toggle),
+            settings_hotkey_settings: strip_ctrl(&config.overlay_hotkey_settings),
+            show_password_openai: false,
+            show_password_anthropic: false,
+            show_password_gemini: false,
+            show_password_openrouter: false,
+            start_on_startup: false,
+            minimize_to_tray: false,
+            editing_hotkey: None,
+            hotkey_edit_buffer: String::new(),
             config,
             runtime_env,
             response_text: String::new(),
@@ -207,6 +226,11 @@ impl OverlayApp {
                     self.is_visible = !self.is_visible;
                     ctx.send_viewport_cmd(egui::ViewportCommand::Visible(self.is_visible));
                 }
+                OverlayEvent::OpenSettings => {
+                    self.show_settings = !self.show_settings;
+                    self.show_qr = false;
+                    ctx.request_repaint();
+                }
             }
         }
     }
@@ -294,11 +318,17 @@ impl OverlayApp {
                     .spacing([8.0, 8.0])
                     .show(ui, |ui| {
                         ui.label(RichText::new("Capture:").color(TEXT_PRIMARY));
-                        ui.add(egui::TextEdit::singleline(&mut self.settings_hotkey_capture).desired_width(120.0));
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new("Ctrl +").color(TEXT_DIM));
+                            ui.add(egui::TextEdit::singleline(&mut self.settings_hotkey_capture).desired_width(100.0));
+                        });
                         ui.end_row();
 
                         ui.label(RichText::new("Toggle/Hide:").color(TEXT_PRIMARY));
-                        ui.add(egui::TextEdit::singleline(&mut self.settings_hotkey_toggle).desired_width(120.0));
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new("Ctrl +").color(TEXT_DIM));
+                            ui.add(egui::TextEdit::singleline(&mut self.settings_hotkey_toggle).desired_width(100.0));
+                        });
                         ui.end_row();
                     });
 
@@ -323,39 +353,58 @@ impl OverlayApp {
                     );
                     
                     if btn_rect.1.clicked() {
-                        if let Err(e) = brido_server::config::save_overlay_settings(
-                            &self.runtime_env,
-                            &self.settings_openai_key,
-                            &self.settings_anthropic_key,
-                            &self.settings_gemini_key,
-                            &self.settings_openrouter_key,
-                            &self.settings_hotkey_capture,
-                            &self.settings_hotkey_toggle,
-                        ) {
-                            self.error_text = Some(format!("Failed to save settings: {}", e));
-                        } else {
-                            // Update config in memory
-                            self.config.openai_api_key = self.settings_openai_key.clone();
-                            self.config.anthropic_api_key = self.settings_anthropic_key.clone();
-                            self.config.gemini_api_key = self.settings_gemini_key.clone();
-                            self.config.openrouter_api_key = self.settings_openrouter_key.clone();
-                            self.config.overlay_hotkey_capture = self.settings_hotkey_capture.clone();
-                            self.config.overlay_hotkey_toggle = self.settings_hotkey_toggle.clone();
+                        let cap_suffix = self.settings_hotkey_capture.trim().to_uppercase();
+                        let tog_suffix = self.settings_hotkey_toggle.trim().to_uppercase();
+                        
+                        // We also need to get settings_hotkey_settings to uppercase but since it isn't shown in UI currently we just use it
+                        let set_suffix = self.settings_hotkey_settings.trim().to_uppercase();
 
-                            // Restart hotkey listener
-                            if let Some(h) = self.hotkey_handle.take() {
-                                h.stop();
+                        if !is_valid_hotkey_suffix(&cap_suffix) {
+                            self.error_text = Some("Invalid Capture hotkey. Use A-Z, 0-9, Space, or basic punctuation. No modifiers (Shift/Alt/Enter).".to_string());
+                        } else if !is_valid_hotkey_suffix(&tog_suffix) {
+                            self.error_text = Some("Invalid Toggle hotkey. Use A-Z, 0-9, Space, or basic punctuation. No modifiers (Shift/Alt/Enter).".to_string());
+                        } else {
+                            let capture_full = format!("Ctrl+{}", cap_suffix);
+                            let toggle_full = format!("Ctrl+{}", tog_suffix);
+                            let settings_full = format!("Ctrl+{}", set_suffix);
+
+                            if let Err(e) = brido_server::config::save_overlay_settings(
+                                &self.runtime_env,
+                                &self.settings_openai_key,
+                                &self.settings_anthropic_key,
+                                &self.settings_gemini_key,
+                                &self.settings_openrouter_key,
+                                &capture_full,
+                                &toggle_full,
+                                &settings_full,
+                            ) {
+                                self.error_text = Some(format!("Failed to save settings: {}", e));
+                            } else {
+                                // Update config in memory
+                                self.config.openai_api_key = self.settings_openai_key.clone();
+                                self.config.anthropic_api_key = self.settings_anthropic_key.clone();
+                                self.config.gemini_api_key = self.settings_gemini_key.clone();
+                                self.config.openrouter_api_key = self.settings_openrouter_key.clone();
+                                self.config.overlay_hotkey_capture = capture_full;
+                                self.config.overlay_hotkey_toggle = toggle_full;
+                                self.config.overlay_hotkey_settings = settings_full;
+
+                                // Restart hotkey listener
+                                if let Some(h) = self.hotkey_handle.take() {
+                                    h.stop();
+                                }
+                                let (_jh, new_handle) = super::hotkey::start_hotkey_listener(
+                                    self.hotkey_tx.clone(),
+                                    &self.config.overlay_hotkey_capture,
+                                    &self.config.overlay_hotkey_toggle,
+                                    &self.config.overlay_hotkey_settings,
+                                );
+                                self.hotkey_handle = Some(new_handle);
+                                
+                                self.show_settings = false;
+                                self.error_text = None;
+                                self.status_text = "Settings saved & applied".to_string();
                             }
-                            let (_jh, new_handle) = super::hotkey::start_hotkey_listener(
-                                self.hotkey_tx.clone(),
-                                &self.config.overlay_hotkey_capture,
-                                &self.config.overlay_hotkey_toggle,
-                            );
-                            self.hotkey_handle = Some(new_handle);
-                            
-                            self.show_settings = false;
-                            self.error_text = None;
-                            self.status_text = "Settings saved & applied".to_string();
                         }
                     }
 
@@ -386,8 +435,9 @@ impl OverlayApp {
                         self.settings_anthropic_key = self.config.anthropic_api_key.clone();
                         self.settings_gemini_key = self.config.gemini_api_key.clone();
                         self.settings_openrouter_key = self.config.openrouter_api_key.clone();
-                        self.settings_hotkey_capture = self.config.overlay_hotkey_capture.clone();
-                        self.settings_hotkey_toggle = self.config.overlay_hotkey_toggle.clone();
+                        self.settings_hotkey_capture = strip_ctrl(&self.config.overlay_hotkey_capture);
+                        self.settings_hotkey_toggle = strip_ctrl(&self.config.overlay_hotkey_toggle);
+                        self.settings_hotkey_settings = strip_ctrl(&self.config.overlay_hotkey_settings);
                     }
                 });
             });
@@ -409,7 +459,7 @@ impl OverlayApp {
                     return;
                 }
                 
-                let payload = format!("brido://{}?port={}&pin={}", self.ip, self.port, self.pin);
+                let payload = format!("brido://{}:{}:{}", self.ip, self.port, self.pin);
                 
                 if self.qr_texture.is_none() {
                     self.qr_texture = Some(crate::ui::qr_panel::generate_qr_texture(ctx, &payload, None));
@@ -470,24 +520,33 @@ impl eframe::App for OverlayApp {
 
                 // Title
                 ui.painter().text(
-                    drag_r.left_center() + egui::vec2(4.0, 0.0),
+                    drag_r.left_center() + egui::vec2(8.0, 0.0),
                     egui::Align2::LEFT_CENTER,
-                    "brido overlay",
+                    "Brido",
                     FontId::new(13.0, FontFamily::Proportional),
                     TEXT_DIM,
                 );
 
-                // Drag handle dots
-                let dots_center = drag_r.center();
-                for i in -2..=2i32 {
-                    let x = dots_center.x + i as f32 * 6.0;
-                    ui.painter()
-                        .circle_filled(egui::pos2(x, dots_center.y), 2.0, TEXT_DIM);
+                // Exit Button
+                let exit_rect = egui::Rect::from_min_size(
+                    drag_r.right_top() + egui::vec2(-28.0, 2.0),
+                    Vec2::new(24.0, 24.0),
+                );
+                let exit_resp = ui.interact(exit_rect, ui.id().with("exit"), egui::Sense::click());
+                ui.painter().text(
+                    exit_rect.center(),
+                    egui::Align2::CENTER_CENTER,
+                    "X",
+                    FontId::new(14.0, FontFamily::Proportional),
+                    if exit_resp.hovered() { Color32::from_rgb(220, 50, 50) } else { TEXT_DIM },
+                );
+                if exit_resp.clicked() {
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                 }
 
                 // Phone Icon
                 let phone_rect = egui::Rect::from_min_size(
-                    drag_r.right_top() + egui::vec2(-54.0, 2.0),
+                    drag_r.right_top() + egui::vec2(-80.0, 2.0),
                     Vec2::new(24.0, 24.0),
                 );
                 let phone_resp = ui.interact(phone_rect, ui.id().with("phone"), egui::Sense::click());
@@ -507,7 +566,7 @@ impl eframe::App for OverlayApp {
 
                 // Gear Icon
                 let gear_rect = egui::Rect::from_min_size(
-                    drag_r.right_top() + egui::vec2(-28.0, 2.0),
+                    drag_r.right_top() + egui::vec2(-54.0, 2.0),
                     Vec2::new(24.0, 24.0),
                 );
                 let gear_resp = ui.interact(gear_rect, ui.id().with("gear"), egui::Sense::click());
@@ -726,4 +785,37 @@ fn render_response(ui: &mut egui::Ui, text: &str) {
                 );
             });
     }
+}
+
+fn strip_ctrl(s: &str) -> String {
+    let lower = s.to_lowercase();
+    if let Some(stripped) = lower.strip_prefix("ctrl+") {
+        // preserve the case of the remaining string
+        s[s.len() - stripped.len()..].to_string()
+    } else if let Some(stripped) = lower.strip_prefix("ctrl + ") {
+        s[s.len() - stripped.len()..].to_string()
+    } else {
+        s.to_string()
+    }
+}
+
+fn is_valid_hotkey_suffix(s: &str) -> bool {
+    let s = s.trim().to_uppercase();
+    let valid_words = ["SPACE", "`", "~", "BACKTICK", "[", "]", ",", "."];
+    if valid_words.contains(&s.as_str()) {
+        return true;
+    }
+    // Reject modifiers or special keys
+    let invalid = ["SHIFT", "CTRL", "ALT", "WIN", "ENTER", "DEL", "DELETE", "TAB", "ESC", "ESCAPE"];
+    if invalid.contains(&s.as_str()) {
+        return false;
+    }
+    // Allow single characters
+    if s.len() == 1 {
+        let c = s.chars().next().unwrap();
+        if c.is_ascii_alphanumeric() || c.is_ascii_punctuation() {
+            return true;
+        }
+    }
+    false
 }

@@ -15,10 +15,12 @@ use windows::Win32::UI::WindowsAndMessaging::{GetMessageW, PostThreadMessageW, M
 pub enum OverlayEvent {
     CaptureAndAnalyse,
     ToggleVisibility,
+    OpenSettings,
 }
 
 const HOTKEY_CAPTURE: i32 = 1;
 const HOTKEY_TOGGLE: i32 = 2;
+const HOTKEY_SETTINGS: i32 = 3;
 
 /// Parses a hotkey string (e.g. "Ctrl+Shift+Space", "Ctrl+`") into modifiers and a Virtual Key Code.
 pub fn parse_hotkey(s: &str) -> (HOT_KEY_MODIFIERS, u32) {
@@ -49,6 +51,8 @@ pub fn parse_hotkey(s: &str) -> (HOT_KEY_MODIFIERS, u32) {
         "`" | "~" | "BACKTICK" => 0xC0, // VK_OEM_3
         "[" => 0xDB, // VK_OEM_4
         "]" => 0xDD, // VK_OEM_6
+        "," => 0xBC, // VK_OEM_COMMA
+        "." => 0xBE, // VK_OEM_PERIOD
         "0" => 0x30,
         "1" => 0x31,
         "2" => 0x32,
@@ -97,13 +101,16 @@ pub fn start_hotkey_listener(
     tx: mpsc::Sender<OverlayEvent>,
     vk_capture_str: &str,
     vk_toggle_str: &str,
+    vk_settings_str: &str,
 ) -> (std::thread::JoinHandle<()>, HotkeyHandle) {
     let (mod_capture, vk_capture) = parse_hotkey(vk_capture_str);
     let (mod_toggle, vk_toggle) = parse_hotkey(vk_toggle_str);
+    let (mod_settings, vk_settings) = parse_hotkey(vk_settings_str);
     
-    // We clone vk_capture_str and vk_toggle_str for logging inside the thread
+    // We clone for logging inside the thread
     let cap_str = vk_capture_str.to_string();
     let tog_str = vk_toggle_str.to_string();
+    let set_str = vk_settings_str.to_string();
     
     let (tid_tx, tid_rx) = mpsc::channel();
     
@@ -132,6 +139,12 @@ pub fn start_hotkey_listener(
                 tracing::info!("Registered hotkey: {} → toggle visibility", tog_str);
             }
 
+            if let Err(e) = RegisterHotKey(None, HOTKEY_SETTINGS, mod_settings, vk_settings) {
+                tracing::error!("Failed to register settings hotkey (VK {}): {e}", vk_settings);
+            } else {
+                tracing::info!("Registered hotkey: {} → open settings", set_str);
+            }
+
             let mut msg = MSG::default();
             loop {
                 let ret = GetMessageW(&mut msg, None, 0, 0);
@@ -145,6 +158,7 @@ pub fn start_hotkey_listener(
                     let event = match id {
                         HOTKEY_CAPTURE => Some(OverlayEvent::CaptureAndAnalyse),
                         HOTKEY_TOGGLE => Some(OverlayEvent::ToggleVisibility),
+                        HOTKEY_SETTINGS => Some(OverlayEvent::OpenSettings),
                         _ => None,
                     };
 
@@ -158,6 +172,7 @@ pub fn start_hotkey_listener(
 
             let _ = UnregisterHotKey(None, HOTKEY_CAPTURE);
             let _ = UnregisterHotKey(None, HOTKEY_TOGGLE);
+            let _ = UnregisterHotKey(None, HOTKEY_SETTINGS);
             tracing::info!("Hotkey listener stopped");
         }
     });
