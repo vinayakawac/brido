@@ -69,6 +69,15 @@ pub struct OverlayApp {
     settings_openrouter_key: String,
     settings_hotkey_capture: String,
     settings_hotkey_toggle: String,
+
+    // ── Phone Connection state ───────────────────────────────────────────
+    ip: String,
+    pin: String,
+    port: u16,
+    server_ready: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    connected_count: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    show_qr: bool,
+    qr_texture: Option<egui::TextureHandle>,
 }
 
 impl OverlayApp {
@@ -79,6 +88,11 @@ impl OverlayApp {
         rt: tokio::runtime::Handle,
         config: brido_server::config::Config,
         runtime_env: brido_server::config::RuntimeEnvPaths,
+        ip: String,
+        pin: String,
+        port: u16,
+        server_ready: std::sync::Arc<std::sync::atomic::AtomicBool>,
+        connected_count: std::sync::Arc<std::sync::atomic::AtomicUsize>,
     ) -> Self {
         let (result_tx, result_rx) = mpsc::channel();
         Self {
@@ -106,6 +120,13 @@ impl OverlayApp {
             stealth_applied: false,
             scroll_to_bottom: false,
             show_settings: false,
+            ip,
+            pin,
+            port,
+            server_ready,
+            connected_count,
+            show_qr: false,
+            qr_texture: None,
         }
     }
 
@@ -265,7 +286,7 @@ impl OverlayApp {
                     });
 
                 ui.add_space(12.0);
-                ui.label(RichText::new("Hotkeys (Ctrl+Shift+)").color(TEXT_SECONDARY));
+                ui.label(RichText::new("Hotkeys").color(TEXT_SECONDARY));
                 ui.add_space(4.0);
                 
                 egui::Grid::new("settings_hotkey_grid")
@@ -273,11 +294,11 @@ impl OverlayApp {
                     .spacing([8.0, 8.0])
                     .show(ui, |ui| {
                         ui.label(RichText::new("Capture:").color(TEXT_PRIMARY));
-                        ui.add(egui::TextEdit::singleline(&mut self.settings_hotkey_capture).desired_width(60.0));
+                        ui.add(egui::TextEdit::singleline(&mut self.settings_hotkey_capture).desired_width(120.0));
                         ui.end_row();
 
-                        ui.label(RichText::new("Toggle:").color(TEXT_PRIMARY));
-                        ui.add(egui::TextEdit::singleline(&mut self.settings_hotkey_toggle).desired_width(60.0));
+                        ui.label(RichText::new("Toggle/Hide:").color(TEXT_PRIMARY));
+                        ui.add(egui::TextEdit::singleline(&mut self.settings_hotkey_toggle).desired_width(120.0));
                         ui.end_row();
                     });
 
@@ -371,6 +392,49 @@ impl OverlayApp {
                 });
             });
     }
+
+    fn render_qr(&mut self, ctx: &egui::Context, ui: &mut egui::Ui) {
+        egui::Frame::new()
+            .fill(SURFACE)
+            .corner_radius(CornerRadius::same(8))
+            .inner_margin(Margin::same(12))
+            .show(ui, |ui| {
+                ui.heading(RichText::new("Phone Connection").color(TEXT_PRIMARY));
+                ui.add_space(8.0);
+                
+                let is_ready = self.server_ready.load(std::sync::atomic::Ordering::Relaxed);
+                
+                if !is_ready {
+                    ui.label(RichText::new("Starting server...").color(YELLOW));
+                    return;
+                }
+                
+                let payload = format!("brido://{}?port={}&pin={}", self.ip, self.port, self.pin);
+                
+                if self.qr_texture.is_none() {
+                    self.qr_texture = Some(crate::ui::qr_panel::generate_qr_texture(ctx, &payload, None));
+                }
+                
+                if let Some(tex) = &self.qr_texture {
+                    ui.vertical_centered(|ui| {
+                        ui.add(egui::Image::new(tex).fit_to_exact_size(Vec2::new(160.0, 160.0)));
+                    });
+                }
+                
+                ui.add_space(8.0);
+                ui.label(RichText::new(format!("IP: {}", self.ip)).color(TEXT_PRIMARY));
+                ui.label(RichText::new(format!("Port: {}", self.port)).color(TEXT_PRIMARY));
+                ui.label(RichText::new(format!("PIN: {}", self.pin)).color(ACCENT));
+                
+                ui.add_space(8.0);
+                let conns = self.connected_count.load(std::sync::atomic::Ordering::Relaxed);
+                if conns > 0 {
+                    ui.label(RichText::new(format!("{} device(s) connected", conns)).color(ACCENT));
+                } else {
+                    ui.label(RichText::new("Waiting for connection...").color(TEXT_DIM));
+                }
+            });
+    }
 }
 
 impl eframe::App for OverlayApp {
@@ -421,6 +485,26 @@ impl eframe::App for OverlayApp {
                         .circle_filled(egui::pos2(x, dots_center.y), 2.0, TEXT_DIM);
                 }
 
+                // Phone Icon
+                let phone_rect = egui::Rect::from_min_size(
+                    drag_r.right_top() + egui::vec2(-54.0, 2.0),
+                    Vec2::new(24.0, 24.0),
+                );
+                let phone_resp = ui.interact(phone_rect, ui.id().with("phone"), egui::Sense::click());
+                ui.painter().text(
+                    phone_rect.center(),
+                    egui::Align2::CENTER_CENTER,
+                    "📱",
+                    FontId::new(14.0, FontFamily::Proportional),
+                    if phone_resp.hovered() { TEXT_PRIMARY } else { TEXT_DIM },
+                );
+                if phone_resp.clicked() {
+                    self.show_qr = !self.show_qr;
+                    if self.show_qr {
+                        self.show_settings = false;
+                    }
+                }
+
                 // Gear Icon
                 let gear_rect = egui::Rect::from_min_size(
                     drag_r.right_top() + egui::vec2(-28.0, 2.0),
@@ -436,6 +520,9 @@ impl eframe::App for OverlayApp {
                 );
                 if gear_resp.clicked() {
                     self.show_settings = !self.show_settings;
+                    if self.show_settings {
+                        self.show_qr = false;
+                    }
                 }
 
                 if drag_response.dragged() {
@@ -494,6 +581,8 @@ impl eframe::App for OverlayApp {
 
                 if self.show_settings {
                     self.render_settings(ui);
+                } else if self.show_qr {
+                    self.render_qr(ctx, ui);
                 } else {
                     // ── Response area ────────────────────────────────────
                     let response_height = ui.available_height() - 80.0; // Reserve space for input
@@ -514,7 +603,7 @@ impl eframe::App for OverlayApp {
                             scroll.show(ui, |ui| {
                                 if self.response_text.is_empty() && self.error_text.is_none() {
                                     ui.label(
-                                        RichText::new(&format!("Press Ctrl+Shift+{} to capture & analyse\nor type a question below", self.config.overlay_hotkey_capture.to_uppercase()))
+                                        RichText::new(&format!("Press {} to capture & analyse\nor type a question below", self.config.overlay_hotkey_capture.to_uppercase()))
                                             .color(TEXT_DIM)
                                             .size(13.0),
                                     );
@@ -569,9 +658,9 @@ impl eframe::App for OverlayApp {
                     ui.add_space(4.0);
                     ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
                         ui.label(
-                            RichText::new(&format!("Ctrl+Shift+{} hide  •  Ctrl+Shift+{} capture", 
-                                self.config.overlay_hotkey_toggle.to_uppercase(), 
-                                self.config.overlay_hotkey_capture.to_uppercase()))
+                            RichText::new(&format!("{} hide  •  {} capture", 
+                                self.config.overlay_hotkey_toggle, 
+                                self.config.overlay_hotkey_capture))
                                 .color(TEXT_DIM)
                                 .size(10.0),
                         );

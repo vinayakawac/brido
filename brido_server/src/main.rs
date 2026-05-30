@@ -1,34 +1,27 @@
+//! brido-overlay — Stealth desktop AI overlay.
+//!
+//! A standalone Windows binary that floats an always-on-top panel for
+//! on-demand screen capture + AI analysis.  No HTTP server, no ports.
+//!
+//! Shares config, capture, encoder, and model_manager with brido-server
+//! via the brido_server library crate.
+
 #![windows_subsystem = "windows"]
 
+mod ai_client;
+mod capture_trigger;
+mod hotkey;
+mod stealth;
+mod window;
+mod server;
 mod ai_server;
 mod stream_server;
-mod tray;
 mod tls;
 mod ui;
 
-// Shared modules come from the library crate.
-use brido_server::capture;
-use brido_server::config;
-use brido_server::encoder;
-use brido_server::model_manager;
-
-use std::collections::HashSet;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::Arc;
-use std::time::{Duration, Instant};
 
-use axum::{
-    routing::{get, post},
-    Router,
-};
-use tokio::sync::{broadcast, RwLock, Semaphore};
-use tower_http::cors::CorsLayer;
-
-use capture::{CaptureMethod, ScreenCapture};
-use config::Config;
-use encoder::FrameEncoder;
-use ui::window::BridoApp;
+use brido_server::config;
 
 fn load_icon() -> egui::IconData {
     let png_bytes = include_bytes!("../../brido.png");
@@ -43,159 +36,14 @@ fn load_icon() -> egui::IconData {
     }
 }
 
-pub struct AppState {
-    pub config: Config,
-    pub frame_tx: broadcast::Sender<Vec<u8>>,
-    pub active_tokens: RwLock<HashSet<String>>,
-    pub http_client: reqwest::Client,
-    pub analysis_gate: Semaphore,
-    pub connected_count: Arc<AtomicUsize>,
-    /// Keeps one receiver alive so the capture thread doesn't exit when no WebSocket clients are connected.
-    _keep_alive_rx: broadcast::Receiver<Vec<u8>>,
-}
-
-/// Spawns the axum server + screen capture on a background thread with its own tokio runtime.
-/// Accepts shared `server_ready` and `connected_count` so the GUI can track state across restarts.
-/// Returns an `axum_server::Handle` that can be used to shut the server down.
-pub fn start_server(
-    config: Config,
-    server_ready: Arc<AtomicBool>,
-    connected_count: Arc<AtomicUsize>,
-) -> axum_server::Handle {
-    server_ready.store(false, Ordering::SeqCst);
-    connected_count.store(0, Ordering::SeqCst);
-
-    let ready_clone = server_ready;
-    let count_clone = connected_count;
-    let handle = axum_server::Handle::new();
-    let handle_for_server = handle.clone();
-
-    let ip = local_ip_address::local_ip()
-        .map(|ip| ip.to_string())
-        .unwrap_or_else(|_| "127.0.0.1".to_string());
-
-    std::thread::spawn(move || {
-        let rt = tokio::runtime::Builder::new_multi_thread()
-            .enable_all()
-            .build()
-            .expect("Failed to create tokio runtime");
-
-        rt.block_on(async move {
-            let port = config.port;
-            let fps = config.capture_fps;
-            let target_w = config.target_width;
-            let target_h = config.target_height;
-            let quality = config.capture_quality;
-
-            let (frame_tx, keep_alive_rx) = broadcast::channel::<Vec<u8>>(8);
-            let tx = frame_tx.clone();
-
-            // Screen capture in a dedicated OS thread (scrap types are !Send)
-            std::thread::spawn(move || {
-                let capture_method = CaptureMethod::from_env();
-                tracing::info!("Capture method: {:?}", capture_method);
-
-                let mut cap = match ScreenCapture::new(capture_method) {
-                    Ok(c) => c,
-                    Err(e) => {
-                        eprintln!("Screen capture init failed: {e}");
-                        return;
-                    }
-                };
-                tracing::info!("Active capture backend: {}", cap.backend_label());
-
-                let encoder = FrameEncoder::new(target_w, target_h, quality);
-                let interval = Duration::from_millis(1000 / fps as u64);
-
-                loop {
-                    let start = Instant::now();
-                    if let Ok(rgb) = cap.capture_frame() {
-                        if let Ok(jpeg) =
-                            encoder.encode(&rgb, cap.width() as u32, cap.height() as u32)
-                        {
-                            // Exit if no receivers (server was shut down)
-                            if tx.send(jpeg).is_err() {
-                                break;
-                            }
-                        }
-                    }
-                    let elapsed = start.elapsed();
-                    if elapsed < interval {
-                        std::thread::sleep(interval - elapsed);
-                    }
-                }
-            });
-
-            let connected_count_clone = count_clone;
-            let http_client = reqwest::Client::builder()
-                .timeout(Duration::from_secs(30))
-                .build()
-                .expect("Failed to create HTTP client");
-
-            let state = Arc::new(AppState {
-                config,
-                frame_tx,
-                active_tokens: RwLock::new(HashSet::new()),
-                http_client,
-                analysis_gate: Semaphore::new(1),
-                connected_count: connected_count_clone,
-                _keep_alive_rx: keep_alive_rx,
-            });
-
-            let app = Router::new()
-                .route("/api/connect", post(ai_server::handle_connect))
-                .route("/api/qr-info", get(ai_server::handle_qr_info))
-                .route("/api/system-info", get(ai_server::handle_system_info))
-                .route("/api/models", get(ai_server::handle_models))
-                .route("/api/analyse", post(ai_server::handle_analyse))
-                .route("/ws/stream", get(stream_server::ws_handler))
-                .layer(CorsLayer::permissive())
-                .with_state(state);
-
-            let listener = loop {
-                match tokio::net::TcpListener::bind(format!("0.0.0.0:{port}")).await {
-                    Ok(l) => break l,
-                    Err(e) => {
-                        eprintln!("Port {port} busy, retrying… ({e})");
-                        tokio::time::sleep(Duration::from_millis(300)).await;
-                    }
-                }
-            };
-
-            ready_clone.store(true, Ordering::SeqCst);
-            println!("  Server ready — listening on https://{ip}:{port}");
-            tracing::info!("Listening (HTTPS) on 0.0.0.0:{port}");
-
-            // Generate self-signed TLS certificate
-            let tls_cert = tls::generate_self_signed_cert(&ip);
-            let rustls_config = axum_server::tls_rustls::RustlsConfig::from_pem(
-                tls_cert.cert_pem,
-                tls_cert.key_pem,
-            )
-            .await
-            .expect("Failed to create TLS config");
-
-            axum_server::from_tcp_rustls(listener.into_std().unwrap(), rustls_config)
-                .handle(handle_for_server)
-                .serve(app.into_make_service())
-                .await
-                .ok();
-
-            println!("  Server stopped.");
-        });
-    });
-
-    handle
-}
-
 fn main() {
     tracing_subscriber::fmt::init();
 
+    // ── Bootstrap env config (same logic as brido-server main.rs) ────
     let (runtime_env, runtime_loaded) = match config::bootstrap_runtime_env() {
         Ok(runtime) => (runtime, true),
         Err(err) => {
             tracing::error!("Failed to bootstrap env configuration: {}", err);
-
             let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
             (
                 config::RuntimeEnvPaths {
@@ -217,70 +65,130 @@ fn main() {
         }
     }
 
-    let config = Config::default();
-    let provider_configured = config.has_any_provider_key();
-    let ip = local_ip_address::local_ip()
-        .map(|ip| ip.to_string())
-        .unwrap_or_else(|_| "unknown".to_string());
-    let pin = config.pin.clone();
-    let port = config.port;
+    let cfg = config::Config::default();
+
+    if !cfg.has_any_provider_key() {
+        eprintln!("╔═══════════════════════════════════════════╗");
+        eprintln!("║  No AI provider key configured.           ║");
+        eprintln!("║  Set one of:                              ║");
+        eprintln!("║    OPENAI_API_KEY                         ║");
+        eprintln!("║    ANTHROPIC_API_KEY                      ║");
+        eprintln!("║    GEMINI_API_KEY                         ║");
+        eprintln!("║    OPENROUTER_API_KEY                     ║");
+        eprintln!("║  in .env.local next to this executable.   ║");
+        eprintln!("╚═══════════════════════════════════════════╝");
+    }
 
     println!();
     println!("╔═══════════════════════════════════════╗");
-    println!("║           Brido Server                ║");
+    println!("║        Brido (Unified)                ║");
     println!("╠═══════════════════════════════════════╣");
-    println!("║  IP Address : {:<23} ║", ip);
-    println!("║  Port       : {:<23} ║", port);
-    println!("║  PIN        : {:<23} ║", pin);
+    println!("║  Hotkeys configured in settings       ║");
     println!("╚═══════════════════════════════════════╝");
     println!();
 
-    // Flags shared between UI and server lifecycle
-    let shutdown_flag = Arc::new(AtomicBool::new(false));
-    let server_ready = Arc::new(AtomicBool::new(false));
-    let connected_count = Arc::new(AtomicUsize::new(0));
+    // ── Tokio runtime for async AI calls ─────────────────────────────
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .worker_threads(2)
+        .build()
+        .expect("Failed to create tokio runtime");
 
-    // Start the network server + capture on a background thread
-    let axum_handle = start_server(config, server_ready.clone(), connected_count.clone());
+    // ── Hotkey listener ──────────────────────────────────────────────
+    let (hotkey_tx, hotkey_rx) = std::sync::mpsc::channel();
+    let (_jh, hotkey_handle) = hotkey::start_hotkey_listener(
+        hotkey_tx.clone(),
+        &cfg.overlay_hotkey_capture,
+        &cfg.overlay_hotkey_toggle,
+    );
 
-    // Build the egui application
-    let app = BridoApp::new(
+    // ── Background Server ────────────────────────────────────────────
+    let server_ready = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let connected_count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let _axum_handle = server::start_server(cfg.clone(), server_ready.clone(), connected_count.clone());
+
+    let ip = local_ip_address::local_ip()
+        .map(|ip| ip.to_string())
+        .unwrap_or_else(|_| "unknown".to_string());
+    let pin = cfg.pin.clone();
+    let port = cfg.port;
+
+    // ── Build the overlay app ────────────────────────────────────────
+    let app = window::OverlayApp::new(
+        hotkey_tx,
+        hotkey_rx,
+        hotkey_handle,
+        rt.handle().clone(),
+        cfg,
+        runtime_env,
         ip,
         pin,
         port,
-        runtime_env,
-        provider_configured,
-        shutdown_flag.clone(),
-        server_ready.clone(),
+        server_ready,
         connected_count,
-        axum_handle,
     );
 
     let native_options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([400.0, 600.0])
-            .with_min_inner_size([360.0, 520.0])
-            .with_title("Brido Server")
-            .with_decorations(true)
+            .with_inner_size([380.0, 600.0])
+            .with_min_inner_size([340.0, 400.0])
+            .with_always_on_top()
+            .with_decorations(false)
+            .with_transparent(true)
             .with_taskbar(false)
+            .with_title("Brido Overlay")
             .with_icon(std::sync::Arc::new(load_icon())),
         ..Default::default()
     };
 
-    // Wait a moment for the server to bind
-    let start = Instant::now();
-    while !server_ready.load(Ordering::SeqCst) && start.elapsed() < Duration::from_secs(5) {
-        std::thread::sleep(Duration::from_millis(50));
-    }
-
     eframe::run_native(
-        "Brido Server",
+        "Brido Overlay",
         native_options,
-        Box::new(|_cc| Ok(Box::new(app))),
+        Box::new(move |_cc| {
+            // Apply stealth after the window is created.
+            // eframe doesn't expose the raw HWND directly, so we find
+            // our window by title using FindWindowW.
+            apply_stealth_by_title();
+
+            Ok(Box::new(app))
+        }),
     )
     .ok();
 
-    // When the window closes, make sure everything shuts down
-    shutdown_flag.store(true, Ordering::SeqCst);
     std::process::exit(0);
+}
+
+/// Find our overlay window by title and apply stealth.
+fn apply_stealth_by_title() {
+    use windows::core::PCWSTR;
+    use windows::Win32::UI::WindowsAndMessaging::FindWindowW;
+
+    unsafe {
+        let title: Vec<u16> = "Brido Overlay\0".encode_utf16().collect();
+        let result = FindWindowW(PCWSTR::null(), PCWSTR(title.as_ptr()));
+        match result {
+            Ok(hwnd) if !hwnd.is_invalid() => {
+                stealth::apply_stealth(hwnd.0 as isize);
+            }
+            _ => {
+                tracing::warn!(
+                    "Could not find overlay window for stealth — will retry after delay"
+                );
+                // Retry after a short delay (window might not be fully created yet)
+                std::thread::spawn(move || {
+                    std::thread::sleep(std::time::Duration::from_millis(500));
+                    let title: Vec<u16> = "Brido Overlay\0".encode_utf16().collect();
+                    let result = FindWindowW(PCWSTR::null(), PCWSTR(title.as_ptr()));
+                    match result {
+                        Ok(hwnd) if !hwnd.is_invalid() => {
+                            stealth::apply_stealth(hwnd.0 as isize);
+                        }
+                        _ => {
+                            tracing::error!("Stealth: could not find window after retry");
+                        }
+                    }
+                });
+            }
+        }
+    }
 }

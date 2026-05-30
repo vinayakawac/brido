@@ -8,12 +8,8 @@ name = "brido_server"
 path = "src/lib.rs"
 
 [[bin]]
-name = "brido-server"
+name = "brido"
 path = "src/main.rs"
-
-[[bin]]
-name = "brido-overlay"
-path = "src/overlay/main.rs"
 
 [dependencies]
 tokio = { version = "1", features = ["full"] }

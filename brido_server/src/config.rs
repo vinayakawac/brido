@@ -100,8 +100,8 @@ impl Default for Config {
             openrouter_api_key: env::var("OPENROUTER_API_KEY").unwrap_or_default(),
             openrouter_base_url: env_or_default("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"),
             openrouter_model: env_or_default("OPENROUTER_MODEL", "openrouter/free"),
-            overlay_hotkey_capture: env_or_default("OVERLAY_HOTKEY_CAPTURE", "Space"),
-            overlay_hotkey_toggle: env_or_default("OVERLAY_HOTKEY_TOGGLE", "H"),
+            overlay_hotkey_capture: env_or_default("OVERLAY_HOTKEY_CAPTURE", "Ctrl+Shift+Space"),
+            overlay_hotkey_toggle: env_or_default("OVERLAY_HOTKEY_TOGGLE", "Ctrl+`"),
         }
     }
 }

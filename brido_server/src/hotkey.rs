@@ -20,11 +20,35 @@ pub enum OverlayEvent {
 const HOTKEY_CAPTURE: i32 = 1;
 const HOTKEY_TOGGLE: i32 = 2;
 
-/// Convert a simple string (e.g. "Space", "H", "A") to a Virtual Key Code.
-pub fn vk_from_string(s: &str) -> u32 {
-    let s = s.trim().to_uppercase();
-    match s.as_str() {
+/// Parses a hotkey string (e.g. "Ctrl+Shift+Space", "Ctrl+`") into modifiers and a Virtual Key Code.
+pub fn parse_hotkey(s: &str) -> (HOT_KEY_MODIFIERS, u32) {
+    let mut mods = MOD_NOREPEAT;
+    let parts: Vec<&str> = s.split('+').map(|p| p.trim()).collect();
+    
+    // If no modifiers specified, default to Ctrl+Shift for backwards compatibility
+    if parts.len() == 1 {
+        mods |= MOD_CONTROL | MOD_SHIFT;
+    } else {
+        for &part in &parts[..parts.len() - 1] {
+            let p = part.to_uppercase();
+            if p == "CTRL" || p == "CONTROL" {
+                mods |= MOD_CONTROL;
+            } else if p == "SHIFT" {
+                mods |= MOD_SHIFT;
+            } else if p == "ALT" {
+                mods |= windows::Win32::UI::Input::KeyboardAndMouse::MOD_ALT;
+            } else if p == "WIN" || p == "WINDOWS" {
+                mods |= windows::Win32::UI::Input::KeyboardAndMouse::MOD_WIN;
+            }
+        }
+    }
+
+    let k = parts.last().unwrap_or(&"SPACE").to_uppercase();
+    let vk = match k.as_str() {
         "SPACE" => 0x20,
+        "`" | "~" | "BACKTICK" => 0xC0, // VK_OEM_3
+        "[" => 0xDB, // VK_OEM_4
+        "]" => 0xDD, // VK_OEM_6
         "0" => 0x30,
         "1" => 0x31,
         "2" => 0x32,
@@ -36,15 +60,16 @@ pub fn vk_from_string(s: &str) -> u32 {
         "8" => 0x38,
         "9" => 0x39,
         _ => {
-            if s.len() == 1 {
-                let c = s.chars().next().unwrap();
+            if k.len() == 1 {
+                let c = k.chars().next().unwrap();
                 if c >= 'A' && c <= 'Z' {
-                    return c as u32;
+                    return (mods, c as u32);
                 }
             }
             0x20 // default to space if invalid
         }
-    }
+    };
+    (mods, vk)
 }
 
 pub struct HotkeyHandle {
@@ -73,8 +98,8 @@ pub fn start_hotkey_listener(
     vk_capture_str: &str,
     vk_toggle_str: &str,
 ) -> (std::thread::JoinHandle<()>, HotkeyHandle) {
-    let vk_capture = vk_from_string(vk_capture_str);
-    let vk_toggle = vk_from_string(vk_toggle_str);
+    let (mod_capture, vk_capture) = parse_hotkey(vk_capture_str);
+    let (mod_toggle, vk_toggle) = parse_hotkey(vk_toggle_str);
     
     // We clone vk_capture_str and vk_toggle_str for logging inside the thread
     let cap_str = vk_capture_str.to_string();
@@ -95,18 +120,16 @@ pub fn start_hotkey_listener(
                 &mut dummy, None, 0, 0, windows::Win32::UI::WindowsAndMessaging::PM_NOREMOVE
             );
 
-            let modifiers: HOT_KEY_MODIFIERS = MOD_CONTROL | MOD_SHIFT | MOD_NOREPEAT;
-
-            if let Err(e) = RegisterHotKey(None, HOTKEY_CAPTURE, modifiers, vk_capture) {
+            if let Err(e) = RegisterHotKey(None, HOTKEY_CAPTURE, mod_capture, vk_capture) {
                 tracing::error!("Failed to register capture hotkey (VK {}): {e}", vk_capture);
             } else {
-                tracing::info!("Registered hotkey: Ctrl+Shift+{} → capture & analyse", cap_str);
+                tracing::info!("Registered hotkey: {} → capture & analyse", cap_str);
             }
 
-            if let Err(e) = RegisterHotKey(None, HOTKEY_TOGGLE, modifiers, vk_toggle) {
+            if let Err(e) = RegisterHotKey(None, HOTKEY_TOGGLE, mod_toggle, vk_toggle) {
                 tracing::error!("Failed to register toggle hotkey (VK {}): {e}", vk_toggle);
             } else {
-                tracing::info!("Registered hotkey: Ctrl+Shift+{} → toggle visibility", tog_str);
+                tracing::info!("Registered hotkey: {} → toggle visibility", tog_str);
             }
 
             let mut msg = MSG::default();
