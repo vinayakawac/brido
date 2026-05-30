@@ -1,15 +1,16 @@
 #![windows_subsystem = "windows"]
 
 mod ai_server;
-mod capture;
-mod capture_gdi;
-mod config;
-mod encoder;
-mod model_manager;
 mod stream_server;
 mod tray;
 mod tls;
 mod ui;
+
+// Shared modules come from the library crate.
+use brido_server::capture;
+use brido_server::config;
+use brido_server::encoder;
+use brido_server::model_manager;
 
 use std::collections::HashSet;
 use std::path::PathBuf;

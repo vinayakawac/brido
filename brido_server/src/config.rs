@@ -29,7 +29,7 @@ OPENROUTER_API_KEY=\n\
 OPENROUTER_BASE_URL=https://openrouter.ai/api/v1\n\
 OPENROUTER_MODEL=openrouter/free\n";
 
-const MANAGED_ENV_KEYS: [&str; 12] = [
+const MANAGED_ENV_KEYS: [&str; 14] = [
     "OPENAI_API_KEY",
     "OPENAI_BASE_URL",
     "OPENAI_MODEL",
@@ -42,6 +42,8 @@ const MANAGED_ENV_KEYS: [&str; 12] = [
     "OPENROUTER_API_KEY",
     "OPENROUTER_BASE_URL",
     "OPENROUTER_MODEL",
+    "OVERLAY_HOTKEY_CAPTURE",
+    "OVERLAY_HOTKEY_TOGGLE",
 ];
 
 #[derive(Clone)]
@@ -64,6 +66,8 @@ pub struct Config {
     pub openrouter_api_key: String,
     pub openrouter_base_url: String,
     pub openrouter_model: String,
+    pub overlay_hotkey_capture: String,
+    pub overlay_hotkey_toggle: String,
 }
 
 impl Config {
@@ -96,6 +100,8 @@ impl Default for Config {
             openrouter_api_key: env::var("OPENROUTER_API_KEY").unwrap_or_default(),
             openrouter_base_url: env_or_default("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"),
             openrouter_model: env_or_default("OPENROUTER_MODEL", "openrouter/free"),
+            overlay_hotkey_capture: env_or_default("OVERLAY_HOTKEY_CAPTURE", "Space"),
+            overlay_hotkey_toggle: env_or_default("OVERLAY_HOTKEY_TOGGLE", "H"),
         }
     }
 }
@@ -354,6 +360,35 @@ pub fn save_provider_api_key(
 
     upsert_env_if_missing(&mut lines, provider.base_url_var(), provider.default_base_url());
     upsert_env_if_missing(&mut lines, provider.model_var(), provider.default_model());
+
+    let updated = join_lines(&lines, line_ending);
+    write_env_file(&runtime.active_env_path, &updated)?;
+    load_runtime_env(runtime)?;
+
+    Ok(())
+}
+
+pub fn save_overlay_settings(
+    runtime: &RuntimeEnvPaths,
+    openai_key: &str,
+    anthropic_key: &str,
+    gemini_key: &str,
+    openrouter_key: &str,
+    hotkey_capture: &str,
+    hotkey_toggle: &str,
+) -> Result<(), EnvConfigError> {
+    ensure_env_file_exists(&runtime.active_env_path)?;
+
+    let existing = read_env_file(&runtime.active_env_path)?;
+    let line_ending = detect_line_ending(&existing);
+    let mut lines = split_lines(&existing);
+
+    upsert_env_line(&mut lines, "OPENAI_API_KEY", openai_key.trim());
+    upsert_env_line(&mut lines, "ANTHROPIC_API_KEY", anthropic_key.trim());
+    upsert_env_line(&mut lines, "GEMINI_API_KEY", gemini_key.trim());
+    upsert_env_line(&mut lines, "OPENROUTER_API_KEY", openrouter_key.trim());
+    upsert_env_line(&mut lines, "OVERLAY_HOTKEY_CAPTURE", hotkey_capture.trim());
+    upsert_env_line(&mut lines, "OVERLAY_HOTKEY_TOGGLE", hotkey_toggle.trim());
 
     let updated = join_lines(&lines, line_ending);
     write_env_file(&runtime.active_env_path, &updated)?;
