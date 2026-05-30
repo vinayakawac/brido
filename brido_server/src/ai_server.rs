@@ -8,8 +8,8 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::model_manager::{AnalyseError, AnalyseErrorCode, ModelManager, ProviderAttempt};
-use crate::AppState;
+use brido_server::model_manager::{AnalyseError, AnalyseErrorCode, ModelManager, ProviderAttempt};
+use crate::server::AppState;
 
 // ── Request / Response types ────────────────────────────────────────────────
 

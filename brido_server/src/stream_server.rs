@@ -10,7 +10,7 @@ use futures_util::{SinkExt, StreamExt};
 use serde::Deserialize;
 use std::sync::Arc;
 
-use crate::AppState;
+use crate::server::AppState;
 
 #[derive(Deserialize)]
 pub struct StreamQuery {
