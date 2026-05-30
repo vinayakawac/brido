@@ -68,6 +68,7 @@ pub struct Config {
     pub openrouter_model: String,
     pub overlay_hotkey_capture: String,
     pub overlay_hotkey_toggle: String,
+    pub overlay_hotkey_settings: String,
 }
 
 impl Config {
@@ -102,6 +103,7 @@ impl Default for Config {
             openrouter_model: env_or_default("OPENROUTER_MODEL", "openrouter/free"),
             overlay_hotkey_capture: env_or_default("OVERLAY_HOTKEY_CAPTURE", "Ctrl+Shift+Space"),
             overlay_hotkey_toggle: env_or_default("OVERLAY_HOTKEY_TOGGLE", "Ctrl+`"),
+            overlay_hotkey_settings: env_or_default("OVERLAY_HOTKEY_SETTINGS", "Ctrl+Shift+,"),
         }
     }
 }
@@ -370,12 +372,13 @@ pub fn save_provider_api_key(
 
 pub fn save_overlay_settings(
     runtime: &RuntimeEnvPaths,
-    openai_key: &str,
-    anthropic_key: &str,
-    gemini_key: &str,
-    openrouter_key: &str,
+    openai: &str,
+    anthropic: &str,
+    gemini: &str,
+    openrouter: &str,
     hotkey_capture: &str,
     hotkey_toggle: &str,
+    hotkey_settings: &str,
 ) -> Result<(), EnvConfigError> {
     ensure_env_file_exists(&runtime.active_env_path)?;
 
@@ -383,12 +386,13 @@ pub fn save_overlay_settings(
     let line_ending = detect_line_ending(&existing);
     let mut lines = split_lines(&existing);
 
-    upsert_env_line(&mut lines, "OPENAI_API_KEY", openai_key.trim());
-    upsert_env_line(&mut lines, "ANTHROPIC_API_KEY", anthropic_key.trim());
-    upsert_env_line(&mut lines, "GEMINI_API_KEY", gemini_key.trim());
-    upsert_env_line(&mut lines, "OPENROUTER_API_KEY", openrouter_key.trim());
+    upsert_env_line(&mut lines, "OPENAI_API_KEY", openai.trim());
+    upsert_env_line(&mut lines, "ANTHROPIC_API_KEY", anthropic.trim());
+    upsert_env_line(&mut lines, "GEMINI_API_KEY", gemini.trim());
+    upsert_env_line(&mut lines, "OPENROUTER_API_KEY", openrouter.trim());
     upsert_env_line(&mut lines, "OVERLAY_HOTKEY_CAPTURE", hotkey_capture.trim());
     upsert_env_line(&mut lines, "OVERLAY_HOTKEY_TOGGLE", hotkey_toggle.trim());
+    upsert_env_line(&mut lines, "OVERLAY_HOTKEY_SETTINGS", hotkey_settings.trim());
 
     let updated = join_lines(&lines, line_ending);
     write_env_file(&runtime.active_env_path, &updated)?;

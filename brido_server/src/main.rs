@@ -100,6 +100,7 @@ fn main() {
         hotkey_tx.clone(),
         &cfg.overlay_hotkey_capture,
         &cfg.overlay_hotkey_toggle,
+        &cfg.overlay_hotkey_settings,
     );
 
     // ── Background Server ────────────────────────────────────────────
