@@ -59,10 +59,9 @@ jobs:
         run: |
           $tag = "${{ github.ref_name }}"
           $out = "release_assets/server"
-          if (!(Test-Path "$out/brido-server-$tag.exe")) { throw "Missing server EXE artifact" }
-          if (!(Test-Path "$out/brido-overlay-$tag.exe")) { throw "Missing overlay EXE artifact" }
-          if (!(Test-Path "$out/brido-server-$tag-bundle.zip")) { throw "Missing ZIP artifact" }
-          if (!(Test-Path "$out/brido-server-$tag.sha256")) { throw "Missing checksum artifact" }
+          if (!(Test-Path "$out/brido-$tag.exe")) { throw "Missing server EXE artifact" }
+          if (!(Test-Path "$out/brido-$tag-bundle.zip")) { throw "Missing ZIP artifact" }
+          if (!(Test-Path "$out/brido-$tag.sha256")) { throw "Missing checksum artifact" }
 
       - name: Upload server artifacts
         uses: actions/upload-artifact@v4
@@ -181,10 +180,9 @@ jobs:
         run: |
           tag="${{ github.ref_name }}"
           required_files=(
-            "release_assets/server/brido-server-${tag}.exe"
-            "release_assets/server/brido-overlay-${tag}.exe"
-            "release_assets/server/brido-server-${tag}-bundle.zip"
-            "release_assets/server/brido-server-${tag}.sha256"
+            "release_assets/server/brido-${tag}.exe"
+            "release_assets/server/brido-${tag}-bundle.zip"
+            "release_assets/server/brido-${tag}.sha256"
             "release_assets/android/brido-android-debug-${tag}.apk"
             "release_assets/android/brido-android-release-${tag}.apk"
           )
@@ -205,9 +203,8 @@ jobs:
           generate_release_notes: true
           fail_on_unmatched_files: true
           files: |
-            release_assets/server/brido-server-${{ github.ref_name }}.exe
-            release_assets/server/brido-overlay-${{ github.ref_name }}.exe
-            release_assets/server/brido-server-${{ github.ref_name }}-bundle.zip
-            release_assets/server/brido-server-${{ github.ref_name }}.sha256
+            release_assets/server/brido-${{ github.ref_name }}.exe
+            release_assets/server/brido-${{ github.ref_name }}-bundle.zip
+            release_assets/server/brido-${{ github.ref_name }}.sha256
             release_assets/android/brido-android-debug-${{ github.ref_name }}.apk
             release_assets/android/brido-android-release-${{ github.ref_name }}.apk
