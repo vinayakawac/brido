@@ -801,21 +801,43 @@ fn strip_ctrl(s: &str) -> String {
 
 fn is_valid_hotkey_suffix(s: &str) -> bool {
     let s = s.trim().to_uppercase();
-    let valid_words = ["SPACE", "`", "~", "BACKTICK", "[", "]", ",", "."];
-    if valid_words.contains(&s.as_str()) {
-        return true;
-    }
-    // Reject modifiers or special keys
-    let invalid = ["SHIFT", "CTRL", "ALT", "WIN", "ENTER", "DEL", "DELETE", "TAB", "ESC", "ESCAPE"];
-    if invalid.contains(&s.as_str()) {
+    if s.is_empty() {
         return false;
     }
+    
+    let parts: Vec<&str> = s.split('+').map(|p| p.trim()).collect();
+    if parts.is_empty() {
+        return false;
+    }
+
+    // Check modifiers (all parts except the last)
+    // The user explicitly requested: "not adding like shift tab capslock... alt is exception"
+    for &part in &parts[..parts.len() - 1] {
+        if part != "ALT" {
+            return false;
+        }
+    }
+
+    let k = parts.last().unwrap();
+
+    let valid_words = ["SPACE", "`", "~", "BACKTICK", "[", "]", ",", "."];
+    if valid_words.contains(k) {
+        return true;
+    }
+    
+    // Reject system or special keys as the final key
+    let invalid = ["SHIFT", "CTRL", "ALT", "WIN", "ENTER", "DEL", "DELETE", "TAB", "ESC", "ESCAPE", "CAPSLOCK", "CAPS"];
+    if invalid.contains(k) {
+        return false;
+    }
+    
     // Allow single characters
-    if s.len() == 1 {
-        let c = s.chars().next().unwrap();
+    if k.len() == 1 {
+        let c = k.chars().next().unwrap();
         if c.is_ascii_alphanumeric() || c.is_ascii_punctuation() {
             return true;
         }
     }
+    
     false
 }
