@@ -1,4 +1,4 @@
-﻿# Brido App
+# Brido App
 
 Android client application for Brido, built with Kotlin and Jetpack Compose.
 
@@ -140,3 +140,9 @@ If any signing secret is missing, the release workflow fails before publishing a
 | Stream disconnects | Check server process and firewall |
 | Analyse shows error | Verify server provider configuration/API key |
 | QR does not scan | Improve lighting/focus or use manual connect |
+
+---
+
+## License
+
+This project is licensed under the Apache License 2.0.

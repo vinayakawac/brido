@@ -1,4 +1,4 @@
-﻿# Brido Server
+# Brido Server
 
 Rust desktop server for Brido. It captures the laptop screen, streams JPEG frames over WSS, and handles AI analysis requests through configured provider APIs.
 
@@ -116,16 +116,20 @@ Base URL: `https://<SERVER_IP>:8080`
 
 | File | Purpose |
 |------|---------|
-| `main.rs` | Entry point, server lifecycle, GUI launch |
+| `main.rs` | Entry point, server lifecycle, overlay GUI launch |
 | `config.rs` | Runtime configuration and environment variables |
 | `capture.rs` | Screen capture |
+| `capture_trigger.rs` | One-shot screen capture to base64 for overlay analysis |
 | `encoder.rs` | Frame resize and JPEG encoding |
 | `ai_server.rs` | REST handlers |
+| `ai_client.rs` | Lightweight AI client for overlay-mode analysis |
 | `stream_server.rs` | WebSocket stream handling |
 | `model_manager.rs` | Provider client calls and failover logic |
 | `tls.rs` | Self-signed cert generation |
+| `hotkey.rs` | Global hotkey registration (Win32 `RegisterHotKey`) and event dispatch |
+| `stealth.rs` | Hide overlay from screen capture and Alt-Tab |
+| `window.rs` | Overlay egui window, hotkey polling, settings, QR panel |
 | `tray.rs` | Tray icon creation, menu wiring, tray event routing |
-| `ui/window.rs` | Main GUI, controls, close/minimize tray behavior |
 | `ui/controls.rs` | `ControlAction` enum |
 | `ui/header.rs` | Header animation |
 | `ui/qr_panel.rs` | QR texture rendering |
@@ -150,4 +154,4 @@ Base URL: `https://<SERVER_IP>:8080`
 | `401 Unauthorized` | PIN mismatch or missing/invalid token |
 | Analyse fails | Provider API key missing or provider endpoint error |
 | No model list | No provider keys configured |
-| Window not visible | Use tray menu `Open` or double-click tray icon |
+| Window not visible | Press the toggle hotkey (same key used to hide) to bring it back; also try tray menu `Open` or double-click tray icon |

@@ -61,6 +61,9 @@ pub struct OverlayApp {
     stealth_applied: bool,
     saved_position: Option<egui::Pos2>,
     scroll_to_bottom: bool,
+    /// HWND of the window that had focus before the overlay took it.
+    /// Used to restore focus after text input, defeating tab-switch detection.
+    prev_foreground_hwnd: isize,
 
     // ── Settings UI state ───────────────────────────────────────────────
     show_settings: bool,
@@ -68,6 +71,10 @@ pub struct OverlayApp {
     settings_anthropic_key: String,
     settings_gemini_key: String,
     settings_openrouter_key: String,
+    settings_ollama_key: String,
+    settings_ollama_base_url: String,
+    settings_active_provider: String,
+    settings_models: std::collections::HashMap<brido_server::config::ProviderKind, String>,
     settings_hotkey_capture: String,
     settings_hotkey_toggle: String,
     settings_hotkey_settings: String,
@@ -117,6 +124,18 @@ impl OverlayApp {
             settings_anthropic_key: config.anthropic_api_key.clone(),
             settings_gemini_key: config.gemini_api_key.clone(),
             settings_openrouter_key: config.openrouter_api_key.clone(),
+            settings_ollama_key: config.ollama_api_key.clone(),
+            settings_ollama_base_url: config.ollama_base_url.clone(),
+            settings_active_provider: config.active_provider.clone(),
+            settings_models: {
+                let mut map = std::collections::HashMap::new();
+                map.insert(brido_server::config::ProviderKind::OpenAI, config.openai_model.clone());
+                map.insert(brido_server::config::ProviderKind::Anthropic, config.anthropic_model.clone());
+                map.insert(brido_server::config::ProviderKind::Gemini, config.gemini_model.clone());
+                map.insert(brido_server::config::ProviderKind::OpenRouter, config.openrouter_model.clone());
+                map.insert(brido_server::config::ProviderKind::Ollama, config.ollama_model.clone());
+                map
+            },
             settings_hotkey_capture: strip_ctrl(&config.overlay_hotkey_capture),
             settings_hotkey_toggle: strip_ctrl(&config.overlay_hotkey_toggle),
             settings_hotkey_settings: strip_ctrl(&config.overlay_hotkey_settings),
@@ -140,6 +159,7 @@ impl OverlayApp {
             stealth_applied: false,
             saved_position: None,
             scroll_to_bottom: false,
+            prev_foreground_hwnd: 0,
             show_settings: false,
             ip,
             pin,
@@ -205,6 +225,8 @@ impl OverlayApp {
     }
 
     /// Submit a manual text question (captures screen as context).
+    /// After submission, restores focus to the previous window to avoid
+    /// triggering browser tab-switching detection.
     fn submit_question(&mut self) {
         let question = self.input_text.trim().to_string();
         if question.is_empty() {
@@ -212,6 +234,10 @@ impl OverlayApp {
         }
         self.input_text.clear();
         self.trigger_capture(Some(question));
+
+        // Restore focus to the browser/previous window immediately
+        super::stealth::restore_focus(self.prev_foreground_hwnd);
+        self.prev_foreground_hwnd = 0;
     }
 
     /// Process pending hotkey events.
@@ -221,7 +247,6 @@ impl OverlayApp {
                 OverlayEvent::CaptureAndAnalyse => {
                     self.is_visible = true;
                     ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
-                    ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
                     self.trigger_capture(None);
                 }
                 OverlayEvent::ToggleVisibility => {
@@ -234,7 +259,6 @@ impl OverlayApp {
                             ));
                         }
                         ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
-                        ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
                     } else {
                         // Hide: save current position, then move offscreen
                         // We read the current viewport position if available
@@ -248,6 +272,7 @@ impl OverlayApp {
                             egui::pos2(-10000.0, -10000.0).into(),
                         ));
                     }
+                    ctx.request_repaint();
                 }
                 OverlayEvent::OpenSettings => {
                     self.show_settings = !self.show_settings;
@@ -308,6 +333,68 @@ impl OverlayApp {
                 ui.heading(RichText::new("Settings").color(TEXT_PRIMARY));
                 ui.add_space(8.0);
                 
+                ui.label(RichText::new("Active AI Settings").color(TEXT_SECONDARY));
+                ui.add_space(4.0);
+
+                let mut current_kind = brido_server::config::ProviderKind::from_label(&self.settings_active_provider).unwrap_or(brido_server::config::ProviderKind::OpenAI);
+                
+                egui::Grid::new("provider_picker_grid")
+                    .num_columns(2)
+                    .spacing([8.0, 8.0])
+                    .show(ui, |ui| {
+                        ui.label(RichText::new("Provider:").color(TEXT_PRIMARY));
+                        egui::ComboBox::from_id_source("provider_picker")
+                            .selected_text(current_kind.label())
+                            .show_ui(ui, |ui| {
+                                for kind in brido_server::config::ProviderKind::ALL {
+                                    if ui.selectable_label(current_kind == kind, kind.label()).clicked() {
+                                        self.settings_active_provider = kind.label().to_string();
+                                        current_kind = kind;
+                                        
+                                        // Set default model for the new provider if it's not present in settings_models
+                                        if !self.settings_models.contains_key(&current_kind) {
+                                            self.settings_models.insert(current_kind, current_kind.default_model().to_string());
+                                        }
+                                    }
+                                }
+                            });
+                        ui.end_row();
+
+                        ui.label(RichText::new("Model:").color(TEXT_PRIMARY));
+                        let mut current_model = self.settings_models.get(&current_kind).cloned().unwrap_or_else(|| current_kind.default_model().to_string());
+                        let models = current_kind.available_models();
+                        
+                        ui.horizontal(|ui| {
+                            let is_custom = !models.contains(&current_model.as_str());
+                            let display_text = if is_custom { "Custom..." } else { &current_model };
+                            
+                            egui::ComboBox::from_id_source("model_picker")
+                                .selected_text(display_text)
+                                .show_ui(ui, |ui| {
+                                    for m in &models {
+                                        if ui.selectable_label(!is_custom && current_model == *m, *m).clicked() {
+                                            current_model = m.to_string();
+                                            self.settings_models.insert(current_kind, current_model.clone());
+                                        }
+                                    }
+                                    if ui.selectable_label(is_custom, "Custom...").clicked() {
+                                        if !is_custom {
+                                            current_model = "".to_string();
+                                            self.settings_models.insert(current_kind, current_model.clone());
+                                        }
+                                    }
+                                });
+
+                            if !models.contains(&current_model.as_str()) {
+                                if ui.add(egui::TextEdit::singleline(&mut current_model).desired_width(120.0)).changed() {
+                                    self.settings_models.insert(current_kind, current_model.clone());
+                                }
+                            }
+                        });
+                        ui.end_row();
+                    });
+
+                ui.add_space(12.0);
                 ui.label(RichText::new("API Keys").color(TEXT_SECONDARY));
                 ui.add_space(4.0);
 
@@ -329,6 +416,14 @@ impl OverlayApp {
 
                         ui.label(RichText::new("OpenRouter:").color(TEXT_PRIMARY));
                         ui.add(egui::TextEdit::singleline(&mut self.settings_openrouter_key).password(true));
+                        ui.end_row();
+
+                        ui.label(RichText::new("Ollama (local):").color(TEXT_PRIMARY));
+                        ui.add(egui::TextEdit::singleline(&mut self.settings_ollama_key).password(true));
+                        ui.end_row();
+
+                        ui.label(RichText::new("Ollama URL:").color(TEXT_PRIMARY));
+                        ui.add(egui::TextEdit::singleline(&mut self.settings_ollama_base_url));
                         ui.end_row();
                     });
 
@@ -393,13 +488,17 @@ impl OverlayApp {
 
                             if let Err(e) = brido_server::config::save_overlay_settings(
                                 &self.runtime_env,
+                                &self.settings_active_provider,
                                 &self.settings_openai_key,
                                 &self.settings_anthropic_key,
                                 &self.settings_gemini_key,
                                 &self.settings_openrouter_key,
+                                &self.settings_ollama_key,
+                                &self.settings_ollama_base_url,
                                 &capture_full,
                                 &toggle_full,
                                 &settings_full,
+                                &self.settings_models,
                             ) {
                                 self.error_text = Some(format!("Failed to save settings: {}", e));
                             } else {
@@ -408,6 +507,15 @@ impl OverlayApp {
                                 self.config.anthropic_api_key = self.settings_anthropic_key.clone();
                                 self.config.gemini_api_key = self.settings_gemini_key.clone();
                                 self.config.openrouter_api_key = self.settings_openrouter_key.clone();
+                                self.config.ollama_api_key = self.settings_ollama_key.clone();
+                                self.config.ollama_base_url = self.settings_ollama_base_url.clone();
+                                self.config.active_provider = self.settings_active_provider.clone();
+                                if let Some(m) = self.settings_models.get(&brido_server::config::ProviderKind::OpenAI) { self.config.openai_model = m.clone(); }
+                                if let Some(m) = self.settings_models.get(&brido_server::config::ProviderKind::Anthropic) { self.config.anthropic_model = m.clone(); }
+                                if let Some(m) = self.settings_models.get(&brido_server::config::ProviderKind::Gemini) { self.config.gemini_model = m.clone(); }
+                                if let Some(m) = self.settings_models.get(&brido_server::config::ProviderKind::OpenRouter) { self.config.openrouter_model = m.clone(); }
+                                if let Some(m) = self.settings_models.get(&brido_server::config::ProviderKind::Ollama) { self.config.ollama_model = m.clone(); }
+                                
                                 self.config.overlay_hotkey_capture = capture_full;
                                 self.config.overlay_hotkey_toggle = toggle_full;
                                 self.config.overlay_hotkey_settings = settings_full;
@@ -458,6 +566,15 @@ impl OverlayApp {
                         self.settings_anthropic_key = self.config.anthropic_api_key.clone();
                         self.settings_gemini_key = self.config.gemini_api_key.clone();
                         self.settings_openrouter_key = self.config.openrouter_api_key.clone();
+                        self.settings_ollama_key = self.config.ollama_api_key.clone();
+                        self.settings_ollama_base_url = self.config.ollama_base_url.clone();
+                        self.settings_active_provider = self.config.active_provider.clone();
+                        self.settings_models.insert(brido_server::config::ProviderKind::OpenAI, self.config.openai_model.clone());
+                        self.settings_models.insert(brido_server::config::ProviderKind::Anthropic, self.config.anthropic_model.clone());
+                        self.settings_models.insert(brido_server::config::ProviderKind::Gemini, self.config.gemini_model.clone());
+                        self.settings_models.insert(brido_server::config::ProviderKind::OpenRouter, self.config.openrouter_model.clone());
+                        self.settings_models.insert(brido_server::config::ProviderKind::Ollama, self.config.ollama_model.clone());
+                        
                         self.settings_hotkey_capture = strip_ctrl(&self.config.overlay_hotkey_capture);
                         self.settings_hotkey_toggle = strip_ctrl(&self.config.overlay_hotkey_toggle);
                         self.settings_hotkey_settings = strip_ctrl(&self.config.overlay_hotkey_settings);
@@ -707,6 +824,15 @@ impl eframe::App for OverlayApp {
                                 .font(FontId::new(13.0, FontFamily::Proportional)),
                         );
 
+                        // Save the foreground window when the text input gains focus
+                        // so we can give it back after submission.
+                        if response.gained_focus() {
+                            let fg = super::stealth::get_foreground_window();
+                            if fg != 0 {
+                                self.prev_foreground_hwnd = fg;
+                            }
+                        }
+
                         // Submit on Enter
                         if response.lost_focus()
                             && ui.input(|i| i.key_pressed(egui::Key::Enter))
@@ -733,6 +859,7 @@ impl eframe::App for OverlayApp {
                         );
                         if btn_rect.1.clicked() && !self.input_text.trim().is_empty() {
                             self.submit_question();
+                            // Focus restore is handled inside submit_question()
                         }
                     });
 

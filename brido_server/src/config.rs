@@ -27,9 +27,17 @@ GEMINI_MODEL=gemini-2.0-flash\n\
 \n\
 OPENROUTER_API_KEY=\n\
 OPENROUTER_BASE_URL=https://openrouter.ai/api/v1\n\
-OPENROUTER_MODEL=openrouter/free\n";
+OPENROUTER_MODEL=openrouter/free\n\
+\n\
+OLLAMA_API_KEY=\n\
+OLLAMA_BASE_URL=http://127.0.0.1:11434/v1\n\
+OLLAMA_MODEL=llama3.2-vision\n\
+\n\
+ACTIVE_PROVIDER=Gemini\n\
+";
 
-const MANAGED_ENV_KEYS: [&str; 14] = [
+
+const MANAGED_ENV_KEYS: [&str; 19] = [
     "OPENAI_API_KEY",
     "OPENAI_BASE_URL",
     "OPENAI_MODEL",
@@ -42,8 +50,13 @@ const MANAGED_ENV_KEYS: [&str; 14] = [
     "OPENROUTER_API_KEY",
     "OPENROUTER_BASE_URL",
     "OPENROUTER_MODEL",
+    "OLLAMA_API_KEY",
+    "OLLAMA_BASE_URL",
+    "OLLAMA_MODEL",
+    "ACTIVE_PROVIDER",
     "OVERLAY_HOTKEY_CAPTURE",
     "OVERLAY_HOTKEY_TOGGLE",
+    "OVERLAY_HOTKEY_SETTINGS",
 ];
 
 #[derive(Clone)]
@@ -66,6 +79,10 @@ pub struct Config {
     pub openrouter_api_key: String,
     pub openrouter_base_url: String,
     pub openrouter_model: String,
+    pub ollama_api_key: String,
+    pub ollama_base_url: String,
+    pub ollama_model: String,
+    pub active_provider: String,
     pub overlay_hotkey_capture: String,
     pub overlay_hotkey_toggle: String,
     pub overlay_hotkey_settings: String,
@@ -77,6 +94,7 @@ impl Config {
             || !self.anthropic_api_key.trim().is_empty()
             || !self.gemini_api_key.trim().is_empty()
             || !self.openrouter_api_key.trim().is_empty()
+            || !self.ollama_api_key.trim().is_empty()
     }
 }
 
@@ -100,7 +118,11 @@ impl Default for Config {
             gemini_model: env_or_default("GEMINI_MODEL", "gemini-2.0-flash"),
             openrouter_api_key: env::var("OPENROUTER_API_KEY").unwrap_or_default(),
             openrouter_base_url: env_or_default("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"),
-            openrouter_model: env_or_default("OPENROUTER_MODEL", "openrouter/free"),
+            openrouter_model: env_or_default("OPENROUTER_MODEL", "google/gemini-2.5-flash:free"),
+            ollama_api_key: env::var("OLLAMA_API_KEY").unwrap_or_default(),
+            ollama_base_url: env_or_default("OLLAMA_BASE_URL", "http://127.0.0.1:11434/v1"),
+            ollama_model: env_or_default("OLLAMA_MODEL", "llava"),
+            active_provider: env_or_default("ACTIVE_PROVIDER", "Gemini"),
             overlay_hotkey_capture: env_or_default("OVERLAY_HOTKEY_CAPTURE", "Ctrl+Shift+Space"),
             overlay_hotkey_toggle: env_or_default("OVERLAY_HOTKEY_TOGGLE", "Ctrl+`"),
             overlay_hotkey_settings: env_or_default("OVERLAY_HOTKEY_SETTINGS", "Ctrl+Shift+,"),
@@ -115,20 +137,22 @@ fn env_or_default(key: &str, fallback: &str) -> String {
         .unwrap_or_else(|| fallback.to_string())
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub enum ProviderKind {
     OpenAI,
     Anthropic,
     Gemini,
     OpenRouter,
+    Ollama,
 }
 
 impl ProviderKind {
-    pub const ALL: [ProviderKind; 4] = [
+    pub const ALL: [ProviderKind; 5] = [
         ProviderKind::OpenAI,
         ProviderKind::Anthropic,
         ProviderKind::Gemini,
         ProviderKind::OpenRouter,
+        ProviderKind::Ollama,
     ];
 
     pub fn label(self) -> &'static str {
@@ -137,6 +161,18 @@ impl ProviderKind {
             ProviderKind::Anthropic => "Anthropic",
             ProviderKind::Gemini => "Gemini",
             ProviderKind::OpenRouter => "OpenRouter",
+            ProviderKind::Ollama => "Ollama",
+        }
+    }
+
+    pub fn from_label(label: &str) -> Option<Self> {
+        match label {
+            "OpenAI" => Some(ProviderKind::OpenAI),
+            "Anthropic" => Some(ProviderKind::Anthropic),
+            "Gemini" => Some(ProviderKind::Gemini),
+            "OpenRouter" => Some(ProviderKind::OpenRouter),
+            "Ollama" => Some(ProviderKind::Ollama),
+            _ => None,
         }
     }
 
@@ -146,6 +182,7 @@ impl ProviderKind {
             ProviderKind::Anthropic => "ANTHROPIC_API_KEY",
             ProviderKind::Gemini => "GEMINI_API_KEY",
             ProviderKind::OpenRouter => "OPENROUTER_API_KEY",
+            ProviderKind::Ollama => "OLLAMA_API_KEY",
         }
     }
 
@@ -155,6 +192,7 @@ impl ProviderKind {
             ProviderKind::Anthropic => "ANTHROPIC_BASE_URL",
             ProviderKind::Gemini => "GEMINI_BASE_URL",
             ProviderKind::OpenRouter => "OPENROUTER_BASE_URL",
+            ProviderKind::Ollama => "OLLAMA_BASE_URL",
         }
     }
 
@@ -164,6 +202,7 @@ impl ProviderKind {
             ProviderKind::Anthropic => "ANTHROPIC_MODEL",
             ProviderKind::Gemini => "GEMINI_MODEL",
             ProviderKind::OpenRouter => "OPENROUTER_MODEL",
+            ProviderKind::Ollama => "OLLAMA_MODEL",
         }
     }
 
@@ -173,15 +212,42 @@ impl ProviderKind {
             ProviderKind::Anthropic => "https://api.anthropic.com/v1",
             ProviderKind::Gemini => "https://generativelanguage.googleapis.com/v1beta",
             ProviderKind::OpenRouter => "https://openrouter.ai/api/v1",
+            ProviderKind::Ollama => "http://127.0.0.1:11434/v1",
         }
     }
 
     pub fn default_model(self) -> &'static str {
         match self {
-            ProviderKind::OpenAI => "gpt-4.1-mini",
+            ProviderKind::OpenAI => "gpt-4o-mini",
             ProviderKind::Anthropic => "claude-3-5-sonnet-latest",
-            ProviderKind::Gemini => "gemini-2.0-flash",
-            ProviderKind::OpenRouter => "openrouter/free",
+            ProviderKind::Gemini => "gemini-2.5-flash",
+            ProviderKind::OpenRouter => "google/gemini-2.5-flash:free",
+            ProviderKind::Ollama => "llama3.2-vision",
+        }
+    }
+
+    pub fn available_models(self) -> Vec<&'static str> {
+        match self {
+            ProviderKind::OpenAI => vec!["gpt-4o", "gpt-4o-mini", "o1-mini", "o1-preview", "gpt-4.1-mini", "gpt-5"],
+            ProviderKind::Anthropic => vec!["claude-3-7-sonnet-latest", "claude-3-5-sonnet-latest", "claude-3-opus-latest", "claude-3-5-haiku-latest"],
+            ProviderKind::Gemini => vec!["gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.0-flash", "gemini-2.0-pro-exp"],
+            ProviderKind::OpenRouter => vec![
+                "google/gemini-2.5-flash:free",
+                "google/gemini-2.0-flash-exp:free",
+                "meta-llama/llama-4-maverick:free",
+                "deepseek/deepseek-r1:free",
+                "qwen/qwen3-235b-a22b:free",
+                "microsoft/mai-ds-r1:free",
+                "openrouter/free",
+            ],
+            ProviderKind::Ollama => vec![
+                "llama3.2-vision", "llama3.3", "llama3.2", "llama3.1",
+                "llava", "llava-phi3", "minicpm-v", "moondream", "bakllava",
+                "deepseek-r1", "deepseek-coder-v2",
+                "qwen2.5", "qwen2.5-coder", "qwen2-vl",
+                "mistral", "mixtral",
+                "gemma2", "phi4",
+            ],
         }
     }
 }
@@ -372,13 +438,17 @@ pub fn save_provider_api_key(
 
 pub fn save_overlay_settings(
     runtime: &RuntimeEnvPaths,
+    active_provider: &str,
     openai: &str,
     anthropic: &str,
     gemini: &str,
     openrouter: &str,
+    ollama: &str,
+    ollama_base_url: &str,
     hotkey_capture: &str,
     hotkey_toggle: &str,
     hotkey_settings: &str,
+    models: &std::collections::HashMap<ProviderKind, String>,
 ) -> Result<(), EnvConfigError> {
     ensure_env_file_exists(&runtime.active_env_path)?;
 
@@ -386,13 +456,22 @@ pub fn save_overlay_settings(
     let line_ending = detect_line_ending(&existing);
     let mut lines = split_lines(&existing);
 
+    upsert_env_line(&mut lines, "ACTIVE_PROVIDER", active_provider.trim());
     upsert_env_line(&mut lines, "OPENAI_API_KEY", openai.trim());
     upsert_env_line(&mut lines, "ANTHROPIC_API_KEY", anthropic.trim());
     upsert_env_line(&mut lines, "GEMINI_API_KEY", gemini.trim());
     upsert_env_line(&mut lines, "OPENROUTER_API_KEY", openrouter.trim());
+    upsert_env_line(&mut lines, "OLLAMA_API_KEY", ollama.trim());
+    upsert_env_line(&mut lines, "OLLAMA_BASE_URL", ollama_base_url.trim());
     upsert_env_line(&mut lines, "OVERLAY_HOTKEY_CAPTURE", hotkey_capture.trim());
     upsert_env_line(&mut lines, "OVERLAY_HOTKEY_TOGGLE", hotkey_toggle.trim());
     upsert_env_line(&mut lines, "OVERLAY_HOTKEY_SETTINGS", hotkey_settings.trim());
+
+    if let Some(m) = models.get(&ProviderKind::OpenAI) { upsert_env_line(&mut lines, "OPENAI_MODEL", m); }
+    if let Some(m) = models.get(&ProviderKind::Anthropic) { upsert_env_line(&mut lines, "ANTHROPIC_MODEL", m); }
+    if let Some(m) = models.get(&ProviderKind::Gemini) { upsert_env_line(&mut lines, "GEMINI_MODEL", m); }
+    if let Some(m) = models.get(&ProviderKind::OpenRouter) { upsert_env_line(&mut lines, "OPENROUTER_MODEL", m); }
+    if let Some(m) = models.get(&ProviderKind::Ollama) { upsert_env_line(&mut lines, "OLLAMA_MODEL", m); }
 
     let updated = join_lines(&lines, line_ending);
     write_env_file(&runtime.active_env_path, &updated)?;
@@ -543,6 +622,9 @@ fn validate_provider_key(provider: ProviderKind, api_key: &str) -> Result<(), En
                     "OpenRouter API key looks too short.".to_string(),
                 ));
             }
+        }
+        ProviderKind::Ollama => {
+            // Ollama can work without an API key, so we don't enforce validation here.
         }
     }
 

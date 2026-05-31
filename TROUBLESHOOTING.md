@@ -1,4 +1,4 @@
-﻿# Troubleshooting
+# Troubleshooting
 
 ## Server startup and configuration
 
@@ -87,6 +87,28 @@ If status does not move to running:
 cd brido_server
 cargo build --release
 ```
+
+## Overlay hotkey and visibility
+
+### Overlay window does not reappear after hiding
+
+The toggle hotkey (configured in settings) both hides and shows the overlay. Press the same hotkey combination again to bring the overlay back.
+
+If the overlay still doesn't appear:
+
+- Verify the hotkey is still registered (check server console output for registration confirmation).
+- Restart the application — hotkeys are re-registered on startup.
+- Check that no other application has claimed the same hotkey combination.
+
+### Overlay is hidden but process is running
+
+When hidden, the overlay moves offscreen but the process stays alive. The hotkey listener continues running in the background. Press the toggle hotkey to restore the window to its previous position.
+
+### Hotkey does not work at all
+
+- Run the application as Administrator if hotkey registration fails.
+- Check for conflicts with other global hotkey software (AutoHotkey, PowerToys, etc.).
+- Look for "Failed to register" errors in the log output.
 
 ## Android app connectivity
 
