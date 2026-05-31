@@ -96,6 +96,7 @@ enum ProviderKind {
     Anthropic,
     Gemini,
     OpenRouter,
+    Ollama,
 }
 
 impl ProviderKind {
@@ -105,6 +106,7 @@ impl ProviderKind {
             ProviderKind::Anthropic => "anthropic",
             ProviderKind::Gemini => "gemini",
             ProviderKind::OpenRouter => "openrouter",
+            ProviderKind::Ollama => "ollama",
         }
     }
 
@@ -114,6 +116,7 @@ impl ProviderKind {
             ProviderKind::OpenAI => 95,
             ProviderKind::Anthropic => 90,
             ProviderKind::Gemini => 85,
+            ProviderKind::Ollama => 80,
         }
     }
 }
@@ -135,34 +138,25 @@ impl<'a> ModelManager<'a> {
     pub fn new(config: &Config, client: &'a reqwest::Client) -> Self {
         let mut providers = Vec::new();
 
-        push_provider(
-            &mut providers,
-            ProviderKind::OpenAI,
-            &config.openai_api_key,
-            &config.openai_base_url,
-            &config.openai_model,
-        );
-        push_provider(
-            &mut providers,
-            ProviderKind::Anthropic,
-            &config.anthropic_api_key,
-            &config.anthropic_base_url,
-            &config.anthropic_model,
-        );
-        push_provider(
-            &mut providers,
-            ProviderKind::Gemini,
-            &config.gemini_api_key,
-            &config.gemini_base_url,
-            &config.gemini_model,
-        );
-        push_provider(
-            &mut providers,
-            ProviderKind::OpenRouter,
-            &config.openrouter_api_key,
-            &config.openrouter_base_url,
-            &config.openrouter_model,
-        );
+        if let Some(kind) = crate::config::ProviderKind::from_label(&config.active_provider) {
+            match kind {
+                crate::config::ProviderKind::OpenAI => {
+                    push_provider(&mut providers, ProviderKind::OpenAI, &config.openai_api_key, &config.openai_base_url, &config.openai_model);
+                }
+                crate::config::ProviderKind::Anthropic => {
+                    push_provider(&mut providers, ProviderKind::Anthropic, &config.anthropic_api_key, &config.anthropic_base_url, &config.anthropic_model);
+                }
+                crate::config::ProviderKind::Gemini => {
+                    push_provider(&mut providers, ProviderKind::Gemini, &config.gemini_api_key, &config.gemini_base_url, &config.gemini_model);
+                }
+                crate::config::ProviderKind::OpenRouter => {
+                    push_provider(&mut providers, ProviderKind::OpenRouter, &config.openrouter_api_key, &config.openrouter_base_url, &config.openrouter_model);
+                }
+                crate::config::ProviderKind::Ollama => {
+                    push_provider(&mut providers, ProviderKind::Ollama, &config.ollama_api_key, &config.ollama_base_url, &config.ollama_model);
+                }
+            }
+        }
 
         providers.sort_by(|a, b| b.kind.rank().cmp(&a.kind.rank()));
 
@@ -205,6 +199,15 @@ impl<'a> ModelManager<'a> {
                 config.gemini_model.clone(),
                 "cloud vision+reasoning".to_string(),
                 9.0,
+            ));
+        }
+
+        if !config.ollama_base_url.trim().is_empty() {
+            entries.push((
+                format!("ollama:{}", config.ollama_model),
+                config.ollama_model.clone(),
+                "local vision+reasoning".to_string(),
+                8.0,
             ));
         }
 
@@ -363,6 +366,7 @@ impl<'a> ModelManager<'a> {
             ProviderKind::Anthropic => self.call_anthropic(provider, image_base64, prompt).await,
             ProviderKind::Gemini => self.call_gemini(provider, image_base64, prompt).await,
             ProviderKind::OpenRouter => self.call_openrouter(provider, image_base64, prompt).await,
+            ProviderKind::Ollama => self.call_openai(provider, image_base64, prompt).await,
         }
     }
 
@@ -640,7 +644,7 @@ fn push_provider(
     base_url: &str,
     model: &str,
 ) {
-    if api_key.trim().is_empty() {
+    if kind != ProviderKind::Ollama && api_key.trim().is_empty() {
         return;
     }
 
@@ -672,6 +676,8 @@ fn parse_provider_hint(model_hint: &str) -> Option<ProviderKind> {
         Some(ProviderKind::Gemini)
     } else if lower.starts_with("openrouter:") || lower.contains("openrouter") {
         Some(ProviderKind::OpenRouter)
+    } else if lower.starts_with("ollama:") || lower.contains("ollama") {
+        Some(ProviderKind::Ollama)
     } else {
         None
     }

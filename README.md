@@ -1,4 +1,4 @@
-﻿<div align="center">
+<div align="center">
 
 <img src="brido.png" alt="Brido Logo" width="100"/>
 
@@ -8,7 +8,7 @@ Stream your laptop screen to your phone and run on-demand AI analysis.
 
 [![Rust](https://img.shields.io/badge/server-Rust-orange?style=flat-square&logo=rust)](brido_server/)
 [![Android](https://img.shields.io/badge/app-Kotlin%20%2F%20Compose-green?style=flat-square&logo=android)](brido_app/)
-[![License](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](#)
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue?style=flat-square)](#)
 
 </div>
 
@@ -100,7 +100,7 @@ While the server is running:
 | App cannot connect | Laptop and phone are on same Wi-Fi, firewall allows server port (default 8080) |
 | PIN rejected | PIN changes on server restart; use the PIN currently shown in GUI |
 | Analyse fails | Verify at least one AI provider API key is configured in `.env.local` |
-| Window seems gone | Check system tray and use `Open` |
+| Window seems gone | Press the toggle hotkey (same key used to hide) to bring it back; also check system tray and use `Open` |
 
 ---
 
