@@ -13,6 +13,7 @@ Server responsibilities:
 3. Session authentication via PIN and bearer token.
 4. AI analysis using configured providers.
 5. Native egui GUI with system tray support.
+6. **Tab-switching detection proofing**: The overlay never steals OS focus from the browser, bypassing `visibilitychange` and `blur` events used by proctoring sites.
 
 ---
 
@@ -57,10 +58,11 @@ You can also start from `brido_server/.env.local.template`.
 
 Provider selection priority in code is:
 
-1. OpenRouter
+1. OpenRouter (Cloud - prioritized for free tier models)
 2. OpenAI
 3. Anthropic
-4. Gemini
+4. Gemini (Cloud - free tier models available)
+5. Ollama (Local - requires a running local Ollama server)
 
 If a model hint is supplied in request payload, matching provider is prioritized for that request.
 
@@ -127,7 +129,7 @@ Base URL: `https://<SERVER_IP>:8080`
 | `model_manager.rs` | Provider client calls and failover logic |
 | `tls.rs` | Self-signed cert generation |
 | `hotkey.rs` | Global hotkey registration (Win32 `RegisterHotKey`) and event dispatch |
-| `stealth.rs` | Hide overlay from screen capture and Alt-Tab |
+| `stealth.rs` | Hide overlay from screen capture, Alt-Tab, and prevent browser tab-switching detection (`WS_EX_NOACTIVATE`) |
 | `window.rs` | Overlay egui window, hotkey polling, settings, QR panel |
 | `tray.rs` | Tray icon creation, menu wiring, tray event routing |
 | `ui/controls.rs` | `ControlAction` enum |
