@@ -59,6 +59,7 @@ pub struct OverlayApp {
     is_visible: bool,
     error_text: Option<String>,
     stealth_applied: bool,
+    saved_position: Option<egui::Pos2>,
     scroll_to_bottom: bool,
 
     // ── Settings UI state ───────────────────────────────────────────────
@@ -137,6 +138,7 @@ impl OverlayApp {
             is_visible: true,
             error_text: None,
             stealth_applied: false,
+            saved_position: None,
             scroll_to_bottom: false,
             show_settings: false,
             ip,
@@ -224,7 +226,28 @@ impl OverlayApp {
                 }
                 OverlayEvent::ToggleVisibility => {
                     self.is_visible = !self.is_visible;
-                    ctx.send_viewport_cmd(egui::ViewportCommand::Visible(self.is_visible));
+                    if self.is_visible {
+                        // Restore: bring window back to saved position
+                        if let Some(pos) = self.saved_position.take() {
+                            ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(
+                                pos.into(),
+                            ));
+                        }
+                        ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+                        ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+                    } else {
+                        // Hide: save current position, then move offscreen
+                        // We read the current viewport position if available
+                        let screen = ctx.input(|i| i.screen_rect);
+                        // Use last known position from apply_first_frame_setup as fallback
+                        let current_pos = ctx.input(|i| {
+                            i.viewport().outer_rect.map(|r| r.min)
+                        }).unwrap_or(egui::pos2(screen.max.x - 380.0 - 12.0, 12.0));
+                        self.saved_position = Some(current_pos);
+                        ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(
+                            egui::pos2(-10000.0, -10000.0).into(),
+                        ));
+                    }
                 }
                 OverlayEvent::OpenSettings => {
                     self.show_settings = !self.show_settings;

@@ -22,12 +22,10 @@ const HOTKEY_CAPTURE: i32 = 1;
 const HOTKEY_TOGGLE: i32 = 2;
 const HOTKEY_SETTINGS: i32 = 3;
 
-/// Parses a hotkey string (e.g. "Ctrl+Shift+Space", "Ctrl+`") into modifiers and a Virtual Key Code.
 pub fn parse_hotkey(s: &str) -> (HOT_KEY_MODIFIERS, u32) {
     let mut mods = MOD_NOREPEAT;
     let parts: Vec<&str> = s.split('+').map(|p| p.trim()).collect();
     
-    // If no modifiers specified, default to Ctrl+Shift for backwards compatibility
     if parts.len() == 1 {
         mods |= MOD_CONTROL | MOD_SHIFT;
     } else {
