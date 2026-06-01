@@ -9,3 +9,5 @@ pub mod capture_gdi;
 pub mod config;
 pub mod encoder;
 pub mod model_manager;
+pub mod audio;
+pub mod voice_manager;

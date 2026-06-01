@@ -33,11 +33,18 @@ OLLAMA_API_KEY=\n\
 OLLAMA_BASE_URL=http://127.0.0.1:11434/v1\n\
 OLLAMA_MODEL=llama3.2-vision\n\
 \n\
+NVIDIA_API_KEY=\n\
+DEEPGRAM_API_KEY=\n\
+RESUME_TEXT=\n\
+JOB_DESCRIPTION_TEXT=\n\
+\n\
 ACTIVE_PROVIDER=Gemini\n\
+ASR_PROVIDER=Nvidia\n\
+ASR_MODEL=nvidia/parakeet-tdt-0.6b-v2\n\
 ";
 
 
-const MANAGED_ENV_KEYS: [&str; 19] = [
+const MANAGED_ENV_KEYS: [&str; 25] = [
     "OPENAI_API_KEY",
     "OPENAI_BASE_URL",
     "OPENAI_MODEL",
@@ -53,7 +60,13 @@ const MANAGED_ENV_KEYS: [&str; 19] = [
     "OLLAMA_API_KEY",
     "OLLAMA_BASE_URL",
     "OLLAMA_MODEL",
+    "NVIDIA_API_KEY",
+    "DEEPGRAM_API_KEY",
+    "RESUME_TEXT",
+    "JOB_DESCRIPTION_TEXT",
     "ACTIVE_PROVIDER",
+    "ASR_PROVIDER",
+    "ASR_MODEL",
     "OVERLAY_HOTKEY_CAPTURE",
     "OVERLAY_HOTKEY_TOGGLE",
     "OVERLAY_HOTKEY_SETTINGS",
@@ -82,7 +95,13 @@ pub struct Config {
     pub ollama_api_key: String,
     pub ollama_base_url: String,
     pub ollama_model: String,
+    pub nvidia_api_key: String,
+    pub deepgram_api_key: String,
+    pub resume_text: String,
+    pub job_description_text: String,
     pub active_provider: String,
+    pub asr_provider: String,
+    pub asr_model: String,
     pub overlay_hotkey_capture: String,
     pub overlay_hotkey_toggle: String,
     pub overlay_hotkey_settings: String,
@@ -122,7 +141,13 @@ impl Default for Config {
             ollama_api_key: env::var("OLLAMA_API_KEY").unwrap_or_default(),
             ollama_base_url: env_or_default("OLLAMA_BASE_URL", "http://127.0.0.1:11434/v1"),
             ollama_model: env_or_default("OLLAMA_MODEL", "llava"),
+            nvidia_api_key: env::var("NVIDIA_API_KEY").unwrap_or_default(),
+            deepgram_api_key: env::var("DEEPGRAM_API_KEY").unwrap_or_default(),
+            resume_text: env::var("RESUME_TEXT").unwrap_or_default(),
+            job_description_text: env::var("JOB_DESCRIPTION_TEXT").unwrap_or_default(),
             active_provider: env_or_default("ACTIVE_PROVIDER", "Gemini"),
+            asr_provider: env_or_default("ASR_PROVIDER", "Nvidia"),
+            asr_model: env_or_default("ASR_MODEL", "nvidia/parakeet-tdt-0.6b-v2"),
             overlay_hotkey_capture: env_or_default("OVERLAY_HOTKEY_CAPTURE", "Ctrl+Shift+Space"),
             overlay_hotkey_toggle: env_or_default("OVERLAY_HOTKEY_TOGGLE", "Ctrl+`"),
             overlay_hotkey_settings: env_or_default("OVERLAY_HOTKEY_SETTINGS", "Ctrl+Shift+,"),
@@ -439,12 +464,18 @@ pub fn save_provider_api_key(
 pub fn save_overlay_settings(
     runtime: &RuntimeEnvPaths,
     active_provider: &str,
+    asr_provider: &str,
+    asr_model: &str,
     openai: &str,
     anthropic: &str,
     gemini: &str,
     openrouter: &str,
     ollama: &str,
     ollama_base_url: &str,
+    nvidia: &str,
+    deepgram: &str,
+    resume: &str,
+    jd: &str,
     hotkey_capture: &str,
     hotkey_toggle: &str,
     hotkey_settings: &str,
@@ -457,12 +488,18 @@ pub fn save_overlay_settings(
     let mut lines = split_lines(&existing);
 
     upsert_env_line(&mut lines, "ACTIVE_PROVIDER", active_provider.trim());
+    upsert_env_line(&mut lines, "ASR_PROVIDER", asr_provider.trim());
+    upsert_env_line(&mut lines, "ASR_MODEL", asr_model.trim());
     upsert_env_line(&mut lines, "OPENAI_API_KEY", openai.trim());
     upsert_env_line(&mut lines, "ANTHROPIC_API_KEY", anthropic.trim());
     upsert_env_line(&mut lines, "GEMINI_API_KEY", gemini.trim());
     upsert_env_line(&mut lines, "OPENROUTER_API_KEY", openrouter.trim());
     upsert_env_line(&mut lines, "OLLAMA_API_KEY", ollama.trim());
     upsert_env_line(&mut lines, "OLLAMA_BASE_URL", ollama_base_url.trim());
+    upsert_env_line(&mut lines, "NVIDIA_API_KEY", nvidia.trim());
+    upsert_env_line(&mut lines, "DEEPGRAM_API_KEY", deepgram.trim());
+    upsert_env_line(&mut lines, "RESUME_TEXT", resume.trim());
+    upsert_env_line(&mut lines, "JOB_DESCRIPTION_TEXT", jd.trim());
     upsert_env_line(&mut lines, "OVERLAY_HOTKEY_CAPTURE", hotkey_capture.trim());
     upsert_env_line(&mut lines, "OVERLAY_HOTKEY_TOGGLE", hotkey_toggle.trim());
     upsert_env_line(&mut lines, "OVERLAY_HOTKEY_SETTINGS", hotkey_settings.trim());

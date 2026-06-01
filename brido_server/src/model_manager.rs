@@ -635,6 +635,317 @@ impl<'a> ModelManager<'a> {
 
         Ok(content)
     }
+
+    pub async fn generate_text(
+        &self,
+        prompt: &str,
+    ) -> std::result::Result<(String, String), AnalyseError> {
+        if self.providers.is_empty() {
+            return Err(
+                AnalyseError::new(
+                    AnalyseErrorCode::NoProviderConfigured,
+                    "No AI provider configured.",
+                    false,
+                )
+                .with_hint("Set one of OPENAI_API_KEY, ANTHROPIC_API_KEY, GEMINI_API_KEY, or OPENROUTER_API_KEY and restart server."),
+            );
+        }
+
+        let candidate_providers = self.providers.clone();
+        let mut last_error: Option<AnalyseError> = None;
+        let mut attempts: Vec<ProviderAttempt> = Vec::new();
+
+        for provider in candidate_providers {
+            let attempt = self
+                .generate_text_with_provider(&provider, prompt)
+                .await;
+
+            match attempt {
+                Ok(result) if !result.trim().is_empty() => {
+                    let model_used = format!("{}:{}", provider.kind.as_str(), provider.model);
+                    return Ok((result.trim().to_string(), model_used));
+                }
+                Ok(_) => {
+                    let err = AnalyseError::new(
+                        AnalyseErrorCode::ProviderReturnedEmpty,
+                        format!("{} returned an empty response", provider.kind.as_str()),
+                        true,
+                    )
+                    .with_provider(provider.kind.as_str(), &provider.model)
+                    .with_hint("Try again or switch to another provider/model.");
+
+                    attempts.push(ProviderAttempt {
+                        provider: provider.kind.as_str().to_string(),
+                        model: provider.model.clone(),
+                        code: err.code.as_str().to_string(),
+                        message: err.message.clone(),
+                    });
+                    last_error = Some(err);
+                }
+                Err(err) => {
+                    attempts.push(ProviderAttempt {
+                        provider: provider.kind.as_str().to_string(),
+                        model: provider.model.clone(),
+                        code: err.code.as_str().to_string(),
+                        message: err.message.clone(),
+                    });
+                    last_error = Some(err);
+                }
+            }
+        }
+
+        let fallback_msg = last_error
+            .as_ref()
+            .map(|err| err.message.clone())
+            .unwrap_or_else(|| "All providers failed.".to_string());
+
+        Err(
+            AnalyseError::new(
+                AnalyseErrorCode::AllProvidersFailed,
+                format!("All providers failed. Last error: {}", fallback_msg),
+                true,
+            )
+            .with_hint("Check provider credentials, model capability, and network connectivity.")
+            .with_attempts(attempts),
+        )
+    }
+
+    async fn generate_text_with_provider(
+        &self,
+        provider: &ProviderConfig,
+        prompt: &str,
+    ) -> std::result::Result<String, AnalyseError> {
+        match provider.kind {
+            ProviderKind::OpenAI => self.call_openai_text(provider, prompt).await,
+            ProviderKind::Anthropic => self.call_anthropic_text(provider, prompt).await,
+            ProviderKind::Gemini => self.call_gemini_text(provider, prompt).await,
+            ProviderKind::OpenRouter => self.call_openrouter_text(provider, prompt).await,
+            ProviderKind::Ollama => self.call_openai_text(provider, prompt).await,
+        }
+    }
+
+    async fn call_openai_text(
+        &self,
+        provider: &ProviderConfig,
+        prompt: &str,
+    ) -> std::result::Result<String, AnalyseError> {
+        let url = format!("{}/chat/completions", trim_trailing_slash(&provider.base_url));
+        let body = OpenAiChatRequestText {
+            model: provider.model.clone(),
+            messages: vec![OpenAiMessageText {
+                role: "user".to_string(),
+                content: prompt.to_string(),
+            }],
+            temperature: 0.1,
+            max_tokens: 900,
+        };
+
+        let response = self
+            .client
+            .post(url)
+            .bearer_auth(&provider.api_key)
+            .json(&body)
+            .send()
+            .await
+            .map_err(|err| classify_transport_error(provider, err))?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let error_text = response.text().await.unwrap_or_default();
+            return Err(classify_http_error(provider, status, &error_text));
+        }
+
+        let payload = response
+            .json::<OpenAiChatResponse>()
+            .await
+            .map_err(|err| {
+                AnalyseError::new(
+                    AnalyseErrorCode::ProviderUnavailable,
+                    format!("Invalid OpenAI response: {}", err),
+                    true,
+                )
+                .with_provider(provider.kind.as_str(), &provider.model)
+            })?;
+        let content = payload
+            .choices
+            .into_iter()
+            .next()
+            .map(|choice| choice.message.content)
+            .unwrap_or_default();
+
+        Ok(content)
+    }
+
+    async fn call_openrouter_text(
+        &self,
+        provider: &ProviderConfig,
+        prompt: &str,
+    ) -> std::result::Result<String, AnalyseError> {
+        let url = format!("{}/chat/completions", trim_trailing_slash(&provider.base_url));
+        let body = OpenAiChatRequestText {
+            model: provider.model.clone(),
+            messages: vec![OpenAiMessageText {
+                role: "user".to_string(),
+                content: prompt.to_string(),
+            }],
+            temperature: 0.1,
+            max_tokens: 900,
+        };
+
+        let response = self
+            .client
+            .post(url)
+            .header("Authorization", format!("Bearer {}", provider.api_key))
+            .header("HTTP-Referer", "https://brido.local")
+            .header("X-Title", "brido")
+            .json(&body)
+            .send()
+            .await
+            .map_err(|err| classify_transport_error(provider, err))?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let error_text = response.text().await.unwrap_or_default();
+            return Err(classify_http_error(provider, status, &error_text));
+        }
+
+        let payload = response
+            .json::<OpenAiChatResponse>()
+            .await
+            .map_err(|err| {
+                AnalyseError::new(
+                    AnalyseErrorCode::ProviderUnavailable,
+                    format!("Invalid OpenRouter response: {}", err),
+                    true,
+                )
+                .with_provider(provider.kind.as_str(), &provider.model)
+            })?;
+        let content = payload
+            .choices
+            .into_iter()
+            .next()
+            .map(|choice| choice.message.content)
+            .unwrap_or_default();
+
+        Ok(content)
+    }
+
+    async fn call_anthropic_text(
+        &self,
+        provider: &ProviderConfig,
+        prompt: &str,
+    ) -> std::result::Result<String, AnalyseError> {
+        let url = format!("{}/messages", trim_trailing_slash(&provider.base_url));
+        let body = AnthropicRequestText {
+            model: provider.model.clone(),
+            max_tokens: 900,
+            temperature: 0.1,
+            messages: vec![AnthropicMessageText {
+                role: "user".to_string(),
+                content: prompt.to_string(),
+            }],
+        };
+
+        let response = self
+            .client
+            .post(url)
+            .header("x-api-key", &provider.api_key)
+            .header("anthropic-version", "2023-06-01")
+            .json(&body)
+            .send()
+            .await
+            .map_err(|err| classify_transport_error(provider, err))?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let error_text = response.text().await.unwrap_or_default();
+            return Err(classify_http_error(provider, status, &error_text));
+        }
+
+        let payload = response
+            .json::<AnthropicResponse>()
+            .await
+            .map_err(|err| {
+                AnalyseError::new(
+                    AnalyseErrorCode::ProviderUnavailable,
+                    format!("Invalid Anthropic response: {}", err),
+                    true,
+                )
+                .with_provider(provider.kind.as_str(), &provider.model)
+            })?;
+        let content = payload
+            .content
+            .into_iter()
+            .filter_map(|item| match item {
+                AnthropicTextBlock::Text { text } => Some(text),
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        Ok(content)
+    }
+
+    async fn call_gemini_text(
+        &self,
+        provider: &ProviderConfig,
+        prompt: &str,
+    ) -> std::result::Result<String, AnalyseError> {
+        let url = format!(
+            "{}/models/{}:generateContent?key={}",
+            trim_trailing_slash(&provider.base_url),
+            provider.model,
+            provider.api_key
+        );
+
+        let body = GeminiRequestText {
+            contents: vec![GeminiContentText {
+                parts: vec![GeminiPartText {
+                    text: prompt.to_string(),
+                }],
+            }],
+            generation_config: GeminiGenerationConfig {
+                temperature: 0.1,
+                max_output_tokens: 900,
+            },
+        };
+
+        let response = self
+            .client
+            .post(url)
+            .json(&body)
+            .send()
+            .await
+            .map_err(|err| classify_transport_error(provider, err))?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let error_text = response.text().await.unwrap_or_default();
+            return Err(classify_http_error(provider, status, &error_text));
+        }
+
+        let payload = response
+            .json::<GeminiResponse>()
+            .await
+            .map_err(|err| {
+                AnalyseError::new(
+                    AnalyseErrorCode::ProviderUnavailable,
+                    format!("Invalid Gemini response: {}", err),
+                    true,
+                )
+                .with_provider(provider.kind.as_str(), &provider.model)
+            })?;
+
+        let content = payload
+            .candidates
+            .unwrap_or_default()
+            .into_iter()
+            .flat_map(|candidate| candidate.content.parts)
+            .filter_map(|part| part.text)
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        Ok(content)
+    }
 }
 
 fn push_provider(
@@ -902,11 +1213,13 @@ struct GeminiPart {
     #[serde(skip_serializing_if = "Option::is_none")]
     text: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "inlineData")]
     inline_data: Option<GeminiInlineData>,
 }
 
 #[derive(Serialize, Deserialize)]
 struct GeminiInlineData {
+    #[serde(rename = "mimeType")]
     mime_type: String,
     data: String,
 }
@@ -931,4 +1244,49 @@ struct GeminiCandidate {
 #[derive(Deserialize)]
 struct GeminiCandidateContent {
     parts: Vec<GeminiPart>,
+}
+
+#[derive(Serialize)]
+struct OpenAiChatRequestText {
+    model: String,
+    messages: Vec<OpenAiMessageText>,
+    temperature: f32,
+    max_tokens: u32,
+}
+
+#[derive(Serialize)]
+struct OpenAiMessageText {
+    role: String,
+    content: String,
+}
+
+#[derive(Serialize)]
+struct AnthropicRequestText {
+    model: String,
+    max_tokens: u32,
+    temperature: f32,
+    messages: Vec<AnthropicMessageText>,
+}
+
+#[derive(Serialize)]
+struct AnthropicMessageText {
+    role: String,
+    content: String,
+}
+
+#[derive(Serialize)]
+struct GeminiRequestText {
+    contents: Vec<GeminiContentText>,
+    #[serde(rename = "generationConfig")]
+    generation_config: GeminiGenerationConfig,
+}
+
+#[derive(Serialize)]
+struct GeminiContentText {
+    parts: Vec<GeminiPartText>,
+}
+
+#[derive(Serialize)]
+struct GeminiPartText {
+    text: String,
 }
