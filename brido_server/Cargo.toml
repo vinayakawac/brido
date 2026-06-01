@@ -17,7 +17,7 @@ axum = { version = "0.7", features = ["ws"] }
 tower-http = { version = "0.6", features = ["cors"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-reqwest = { version = "0.12", features = ["json"] }
+reqwest = { version = "0.12", features = ["json", "multipart"] }
 scrap = "0.5"
 winapi = { version = "0.3", features = ["wingdi", "winuser", "windef", "minwindef"] }
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
@@ -31,6 +31,10 @@ tracing-subscriber = "0.3"
 futures-util = "0.3"
 local-ip-address = "0.6"
 dotenvy = "0.15"
+
+# Audio
+cpal = "0.15"
+hound = "3.5"
 
 # TLS
 rcgen = "0.13"

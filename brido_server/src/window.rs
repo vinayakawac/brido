@@ -73,7 +73,13 @@ pub struct OverlayApp {
     settings_openrouter_key: String,
     settings_ollama_key: String,
     settings_ollama_base_url: String,
+    settings_nvidia_key: String,
+    settings_deepgram_key: String,
+    settings_resume: String,
+    settings_jd: String,
     settings_active_provider: String,
+    settings_asr_provider: String,
+    settings_asr_model: String,
     settings_models: std::collections::HashMap<brido_server::config::ProviderKind, String>,
     settings_hotkey_capture: String,
     settings_hotkey_toggle: String,
@@ -96,6 +102,9 @@ pub struct OverlayApp {
     connected_count: std::sync::Arc<std::sync::atomic::AtomicUsize>,
     show_qr: bool,
     qr_texture: Option<egui::TextureHandle>,
+    voice_mode: bool,
+    voice_copilot_task: Option<tokio::task::JoinHandle<()>>,
+    audio_stop_tx: Option<std::sync::mpsc::Sender<()>>,
 }
 
 impl OverlayApp {
@@ -126,7 +135,13 @@ impl OverlayApp {
             settings_openrouter_key: config.openrouter_api_key.clone(),
             settings_ollama_key: config.ollama_api_key.clone(),
             settings_ollama_base_url: config.ollama_base_url.clone(),
+            settings_nvidia_key: config.nvidia_api_key.clone(),
+            settings_deepgram_key: config.deepgram_api_key.clone(),
+            settings_resume: config.resume_text.clone(),
+            settings_jd: config.job_description_text.clone(),
             settings_active_provider: config.active_provider.clone(),
+            settings_asr_provider: config.asr_provider.clone(),
+            settings_asr_model: config.asr_model.clone(),
             settings_models: {
                 let mut map = std::collections::HashMap::new();
                 map.insert(brido_server::config::ProviderKind::OpenAI, config.openai_model.clone());
@@ -151,7 +166,7 @@ impl OverlayApp {
             runtime_env,
             response_text: String::new(),
             model_used: String::new(),
-            status_text: "Ready — Ctrl+Shift+Space to capture".to_string(),
+            status_text: "weLcome!!!".to_string(),
             input_text: String::new(),
             is_loading: false,
             is_visible: true,
@@ -168,6 +183,9 @@ impl OverlayApp {
             connected_count,
             show_qr: false,
             qr_texture: None,
+            voice_mode: false,
+            voice_copilot_task: None,
+            audio_stop_tx: None,
         }
     }
 
@@ -222,6 +240,80 @@ impl OverlayApp {
                 }
             }
         });
+    }
+
+    fn toggle_voice_mode(&mut self) {
+        self.voice_mode = !self.voice_mode;
+        
+        if self.voice_mode {
+            self.status_text = "Voice Mode Active".to_string();
+            
+            let (audio_tx, mut audio_rx) = tokio::sync::mpsc::channel(100);
+            
+            let (stop_tx, stop_rx) = std::sync::mpsc::channel();
+            self.audio_stop_tx = Some(stop_tx);
+            
+            let error_tx = self.result_tx.clone();
+            std::thread::spawn(move || {
+                let _capture = match brido_server::audio::AudioCapture::new(audio_tx) {
+                    Ok(c) => c,
+                    Err(e) => {
+                        let _ = error_tx.send(AnalysisResult::Error(format!("Mic error: {}", e)));
+                        return;
+                    }
+                };
+                let _ = stop_rx.recv();
+            });
+            
+            let mut copilot = brido_server::voice_manager::VoiceCopilot::new(
+                self.config.nvidia_api_key.clone(),
+                self.config.deepgram_api_key.clone(),
+                self.config.resume_text.clone(),
+                self.config.job_description_text.clone(),
+            );
+            
+            let result_tx = self.result_tx.clone();
+            let config = self.config.clone();
+            
+            self.voice_copilot_task = Some(self.rt.spawn(async move {
+                while let Some(chunk) = audio_rx.recv().await {
+                    match copilot.transcribe_chunk(&chunk.wav_data, &config.asr_provider, &config.asr_model).await {
+                        Ok(transcript) => {
+                            if !transcript.trim().is_empty() {
+                                let _ = result_tx.send(AnalysisResult::Done {
+                                    response: format!("[Listening...]\n{}", transcript),
+                                    model_used: format!("{} ASR", config.asr_provider),
+                                });
+                                
+                                match copilot.append_and_generate(&transcript, &config).await {
+                                    Ok(Some(answer)) => {
+                                        let _ = result_tx.send(AnalysisResult::Done {
+                                            response: answer,
+                                            model_used: "Voice Copilot".to_string(),
+                                        });
+                                    }
+                                    Ok(None) => {}
+                                    Err(e) => {
+                                        let _ = result_tx.send(AnalysisResult::Error(format!("AI error: {}", e)));
+                                    }
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            let _ = result_tx.send(AnalysisResult::Error(format!("ASR error: {}", e)));
+                        }
+                    }
+                }
+            }));
+        } else {
+            self.status_text = "Voice Mode Disabled".to_string();
+            if let Some(task) = self.voice_copilot_task.take() {
+                task.abort();
+            }
+            if let Some(stop_tx) = self.audio_stop_tx.take() {
+                let _ = stop_tx.send(());
+            }
+        }
     }
 
     /// Submit a manual text question (captures screen as context).
@@ -330,8 +422,11 @@ impl OverlayApp {
             .corner_radius(CornerRadius::same(8))
             .inner_margin(Margin::same(12))
             .show(ui, |ui| {
-                ui.heading(RichText::new("Settings").color(TEXT_PRIMARY));
-                ui.add_space(8.0);
+                egui::ScrollArea::vertical()
+                    .auto_shrink([false; 2])
+                    .show(ui, |ui| {
+                        ui.heading(RichText::new("Settings").color(TEXT_PRIMARY));
+                        ui.add_space(8.0);
                 
                 ui.label(RichText::new("Active AI Settings").color(TEXT_SECONDARY));
                 ui.add_space(4.0);
@@ -392,6 +487,23 @@ impl OverlayApp {
                             }
                         });
                         ui.end_row();
+
+                        ui.label(RichText::new("ASR Provider:").color(TEXT_PRIMARY));
+                        egui::ComboBox::from_id_source("asr_picker")
+                            .selected_text(&self.settings_asr_provider)
+                            .show_ui(ui, |ui| {
+                                if ui.selectable_label(self.settings_asr_provider == "Nvidia", "Nvidia").clicked() {
+                                    self.settings_asr_provider = "Nvidia".to_string();
+                                }
+                                if ui.selectable_label(self.settings_asr_provider == "Deepgram", "Deepgram").clicked() {
+                                    self.settings_asr_provider = "Deepgram".to_string();
+                                }
+                            });
+                        ui.end_row();
+
+                        ui.label(RichText::new("Voice Model:").color(TEXT_PRIMARY));
+                        ui.add(egui::TextEdit::singleline(&mut self.settings_asr_model).desired_width(120.0));
+                        ui.end_row();
                     });
 
                 ui.add_space(12.0);
@@ -424,6 +536,22 @@ impl OverlayApp {
 
                         ui.label(RichText::new("Ollama URL:").color(TEXT_PRIMARY));
                         ui.add(egui::TextEdit::singleline(&mut self.settings_ollama_base_url));
+                        ui.end_row();
+
+                        ui.label(RichText::new("Nvidia API:").color(TEXT_PRIMARY));
+                        ui.add(egui::TextEdit::singleline(&mut self.settings_nvidia_key).password(true));
+                        ui.end_row();
+
+                        ui.label(RichText::new("Deepgram API:").color(TEXT_PRIMARY));
+                        ui.add(egui::TextEdit::singleline(&mut self.settings_deepgram_key).password(true));
+                        ui.end_row();
+
+                        ui.label(RichText::new("Resume:").color(TEXT_PRIMARY));
+                        ui.add(egui::TextEdit::multiline(&mut self.settings_resume).desired_rows(3));
+                        ui.end_row();
+
+                        ui.label(RichText::new("Job Description:").color(TEXT_PRIMARY));
+                        ui.add(egui::TextEdit::multiline(&mut self.settings_jd).desired_rows(3));
                         ui.end_row();
                     });
 
@@ -489,12 +617,18 @@ impl OverlayApp {
                             if let Err(e) = brido_server::config::save_overlay_settings(
                                 &self.runtime_env,
                                 &self.settings_active_provider,
+                                &self.settings_asr_provider,
+                                &self.settings_asr_model,
                                 &self.settings_openai_key,
                                 &self.settings_anthropic_key,
                                 &self.settings_gemini_key,
                                 &self.settings_openrouter_key,
                                 &self.settings_ollama_key,
                                 &self.settings_ollama_base_url,
+                                &self.settings_nvidia_key,
+                                &self.settings_deepgram_key,
+                                &self.settings_resume,
+                                &self.settings_jd,
                                 &capture_full,
                                 &toggle_full,
                                 &settings_full,
@@ -509,7 +643,13 @@ impl OverlayApp {
                                 self.config.openrouter_api_key = self.settings_openrouter_key.clone();
                                 self.config.ollama_api_key = self.settings_ollama_key.clone();
                                 self.config.ollama_base_url = self.settings_ollama_base_url.clone();
+                                self.config.nvidia_api_key = self.settings_nvidia_key.clone();
+                                self.config.deepgram_api_key = self.settings_deepgram_key.clone();
+                                self.config.resume_text = self.settings_resume.clone();
+                                self.config.job_description_text = self.settings_jd.clone();
                                 self.config.active_provider = self.settings_active_provider.clone();
+                                self.config.asr_provider = self.settings_asr_provider.clone();
+                                self.config.asr_model = self.settings_asr_model.clone();
                                 if let Some(m) = self.settings_models.get(&brido_server::config::ProviderKind::OpenAI) { self.config.openai_model = m.clone(); }
                                 if let Some(m) = self.settings_models.get(&brido_server::config::ProviderKind::Anthropic) { self.config.anthropic_model = m.clone(); }
                                 if let Some(m) = self.settings_models.get(&brido_server::config::ProviderKind::Gemini) { self.config.gemini_model = m.clone(); }
@@ -568,7 +708,13 @@ impl OverlayApp {
                         self.settings_openrouter_key = self.config.openrouter_api_key.clone();
                         self.settings_ollama_key = self.config.ollama_api_key.clone();
                         self.settings_ollama_base_url = self.config.ollama_base_url.clone();
+                        self.settings_nvidia_key = self.config.nvidia_api_key.clone();
+                        self.settings_deepgram_key = self.config.deepgram_api_key.clone();
+                        self.settings_resume = self.config.resume_text.clone();
+                        self.settings_jd = self.config.job_description_text.clone();
                         self.settings_active_provider = self.config.active_provider.clone();
+                        self.settings_asr_provider = self.config.asr_provider.clone();
+                        self.settings_asr_model = self.config.asr_model.clone();
                         self.settings_models.insert(brido_server::config::ProviderKind::OpenAI, self.config.openai_model.clone());
                         self.settings_models.insert(brido_server::config::ProviderKind::Anthropic, self.config.anthropic_model.clone());
                         self.settings_models.insert(brido_server::config::ProviderKind::Gemini, self.config.gemini_model.clone());
@@ -581,6 +727,7 @@ impl OverlayApp {
                     }
                 });
             });
+        });
     }
 
     fn render_qr(&mut self, ctx: &egui::Context, ui: &mut egui::Ui) {
@@ -702,6 +849,23 @@ impl eframe::App for OverlayApp {
                     if self.show_qr {
                         self.show_settings = false;
                     }
+                }
+
+                // Voice Toggle Icon
+                let voice_rect = egui::Rect::from_min_size(
+                    drag_r.right_top() + egui::vec2(-106.0, 2.0),
+                    Vec2::new(24.0, 24.0),
+                );
+                let voice_resp = ui.interact(voice_rect, ui.id().with("voice"), egui::Sense::click());
+                ui.painter().text(
+                    voice_rect.center(),
+                    egui::Align2::CENTER_CENTER,
+                    if self.voice_mode { "🎙" } else { "🎤" },
+                    FontId::new(14.0, FontFamily::Proportional),
+                    if voice_resp.hovered() { TEXT_PRIMARY } else if self.voice_mode { ACCENT } else { TEXT_DIM },
+                );
+                if voice_resp.clicked() {
+                    self.toggle_voice_mode();
                 }
 
                 // Gear Icon
