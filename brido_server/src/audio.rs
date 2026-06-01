@@ -1,9 +1,6 @@
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use cpal::{SampleFormat, SampleRate, SupportedStreamConfig};
-use hound::{WavSpec, WavWriter};
-use std::io::Cursor;
+use cpal::SampleFormat;
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 use tracing::{error, info};
 
@@ -15,102 +12,52 @@ pub enum AudioSource {
 
 #[derive(Clone)]
 pub struct AudioChunk {
-    pub wav_data: Vec<u8>,
+    pub pcm_data: Vec<u8>,
+    pub sample_rate: u32,
+    pub channels: u16,
     pub source: AudioSource,
 }
 
 struct AudioBuffer {
-    samples: Vec<f32>,
-    last_speech: Instant,
-    is_speaking: bool,
+    buffer: Vec<u8>,
     source: AudioSource,
-    spec: WavSpec,
+    sample_rate: u32,
+    channels: u16,
     tx: mpsc::Sender<AudioChunk>,
 }
 
 impl AudioBuffer {
     fn new(source: AudioSource, sample_rate: u32, channels: u16, tx: mpsc::Sender<AudioChunk>) -> Self {
-        let spec = WavSpec {
-            channels,
-            sample_rate,
-            bits_per_sample: 32,
-            sample_format: hound::SampleFormat::Float,
-        };
         Self {
-            samples: Vec::new(),
-            last_speech: Instant::now(),
-            is_speaking: false,
+            buffer: Vec::new(),
             source,
-            spec,
+            sample_rate,
+            channels,
             tx,
         }
     }
 
     fn process_samples(&mut self, data: &[f32]) {
-        // Calculate RMS
-        let mut sum_sq = 0.0;
         for &sample in data {
-            sum_sq += sample * sample;
-        }
-        let rms = (sum_sq / data.len() as f32).sqrt();
-
-        // Simple VAD threshold (needs tuning based on actual mic/system volume)
-        let threshold = 0.005;
-
-        if rms > threshold {
-            self.is_speaking = true;
-            self.last_speech = Instant::now();
+            let sample_i16 = (sample * i16::MAX as f32).clamp(i16::MIN as f32, i16::MAX as f32) as i16;
+            let bytes = sample_i16.to_le_bytes();
+            self.buffer.push(bytes[0]);
+            self.buffer.push(bytes[1]);
         }
 
-        if self.is_speaking {
-            self.samples.extend_from_slice(data);
+        // Send a chunk approximately every 250ms
+        let bytes_per_sec = self.sample_rate as usize * self.channels as usize * 2;
+        let chunk_size = bytes_per_sec / 4; 
+
+        if self.buffer.len() >= chunk_size {
+            let chunk = AudioChunk {
+                pcm_data: std::mem::take(&mut self.buffer),
+                sample_rate: self.sample_rate,
+                channels: self.channels,
+                source: self.source.clone(),
+            };
+            let _ = self.tx.try_send(chunk);
         }
-
-        // If silence for more than 1.5 seconds, flush
-        if self.is_speaking && self.last_speech.elapsed() > Duration::from_millis(1500) {
-            self.flush();
-        }
-        
-        // Also flush if buffer gets too large (e.g., 15 seconds)
-        let max_samples = (self.spec.sample_rate * self.spec.channels as u32 * 15) as usize;
-        if self.samples.len() > max_samples {
-            self.flush();
-        }
-    }
-
-    fn flush(&mut self) {
-        if self.samples.is_empty() {
-            return;
-        }
-
-        // Require at least 0.5s of audio to send a chunk, otherwise discard
-        let min_samples = (self.spec.sample_rate * self.spec.channels as u32) as usize / 2;
-        if self.samples.len() < min_samples {
-            self.samples.clear();
-            self.is_speaking = false;
-            return;
-        }
-
-        let mut cursor = Cursor::new(Vec::new());
-        {
-            let mut writer = WavWriter::new(&mut cursor, self.spec).unwrap();
-            for &sample in &self.samples {
-                writer.write_sample(sample).unwrap();
-            }
-            writer.finalize().unwrap();
-        }
-
-        let wav_data = cursor.into_inner();
-        let chunk = AudioChunk {
-            wav_data,
-            source: self.source.clone(),
-        };
-
-        // try_send is non-blocking, good for audio thread
-        let _ = self.tx.try_send(chunk);
-
-        self.samples.clear();
-        self.is_speaking = false;
     }
 }
 

@@ -73,12 +73,10 @@ pub struct OverlayApp {
     settings_openrouter_key: String,
     settings_ollama_key: String,
     settings_ollama_base_url: String,
-    settings_nvidia_key: String,
     settings_deepgram_key: String,
     settings_resume: String,
     settings_jd: String,
     settings_active_provider: String,
-    settings_asr_provider: String,
     settings_asr_model: String,
     settings_models: std::collections::HashMap<brido_server::config::ProviderKind, String>,
     settings_hotkey_capture: String,
@@ -135,12 +133,10 @@ impl OverlayApp {
             settings_openrouter_key: config.openrouter_api_key.clone(),
             settings_ollama_key: config.ollama_api_key.clone(),
             settings_ollama_base_url: config.ollama_base_url.clone(),
-            settings_nvidia_key: config.nvidia_api_key.clone(),
             settings_deepgram_key: config.deepgram_api_key.clone(),
             settings_resume: config.resume_text.clone(),
             settings_jd: config.job_description_text.clone(),
             settings_active_provider: config.active_provider.clone(),
-            settings_asr_provider: config.asr_provider.clone(),
             settings_asr_model: config.asr_model.clone(),
             settings_models: {
                 let mut map = std::collections::HashMap::new();
@@ -266,7 +262,6 @@ impl OverlayApp {
             });
             
             let mut copilot = brido_server::voice_manager::VoiceCopilot::new(
-                self.config.nvidia_api_key.clone(),
                 self.config.deepgram_api_key.clone(),
                 self.config.resume_text.clone(),
                 self.config.job_description_text.clone(),
@@ -275,33 +270,38 @@ impl OverlayApp {
             let result_tx = self.result_tx.clone();
             let config = self.config.clone();
             
+            let (tx_transcript, mut rx_transcript) = tokio::sync::mpsc::channel(100);
+
             self.voice_copilot_task = Some(self.rt.spawn(async move {
-                while let Some(chunk) = audio_rx.recv().await {
-                    match copilot.transcribe_chunk(&chunk.wav_data, &config.asr_provider, &config.asr_model).await {
-                        Ok(transcript) => {
-                            if !transcript.trim().is_empty() {
+                if let Err(e) = copilot.start_streaming_session(audio_rx, tx_transcript).await {
+                    let _ = result_tx.send(AnalysisResult::Error(format!("ASR start error: {}", e)));
+                    return;
+                }
+
+                while let Some((transcript, is_final)) = rx_transcript.recv().await {
+                    if is_final {
+                        let _ = result_tx.send(AnalysisResult::Done {
+                            response: format!("[ FINAL ] {}", transcript),
+                            model_used: "Deepgram ASR".to_string(),
+                        });
+                        
+                        match copilot.append_and_generate(&transcript, &config).await {
+                            Ok(Some(answer)) => {
                                 let _ = result_tx.send(AnalysisResult::Done {
-                                    response: format!("[Listening...]\n{}", transcript),
-                                    model_used: format!("{} ASR", config.asr_provider),
+                                    response: answer,
+                                    model_used: "Voice Copilot".to_string(),
                                 });
-                                
-                                match copilot.append_and_generate(&transcript, &config).await {
-                                    Ok(Some(answer)) => {
-                                        let _ = result_tx.send(AnalysisResult::Done {
-                                            response: answer,
-                                            model_used: "Voice Copilot".to_string(),
-                                        });
-                                    }
-                                    Ok(None) => {}
-                                    Err(e) => {
-                                        let _ = result_tx.send(AnalysisResult::Error(format!("AI error: {}", e)));
-                                    }
-                                }
+                            }
+                            Ok(None) => {}
+                            Err(e) => {
+                                let _ = result_tx.send(AnalysisResult::Error(format!("AI error: {}", e)));
                             }
                         }
-                        Err(e) => {
-                            let _ = result_tx.send(AnalysisResult::Error(format!("ASR error: {}", e)));
-                        }
+                    } else {
+                        let _ = result_tx.send(AnalysisResult::Done {
+                            response: format!("[Interim] {}", transcript),
+                            model_used: "Deepgram ASR".to_string(),
+                        });
                     }
                 }
             }));
@@ -423,7 +423,8 @@ impl OverlayApp {
             .inner_margin(Margin::same(12))
             .show(ui, |ui| {
                 egui::ScrollArea::vertical()
-                    .auto_shrink([false; 2])
+                    .max_height(400.0)
+                    .auto_shrink([false, true])
                     .show(ui, |ui| {
                         ui.heading(RichText::new("Settings").color(TEXT_PRIMARY));
                         ui.add_space(8.0);
@@ -488,22 +489,20 @@ impl OverlayApp {
                         });
                         ui.end_row();
 
-                        ui.label(RichText::new("ASR Provider:").color(TEXT_PRIMARY));
-                        egui::ComboBox::from_id_source("asr_picker")
-                            .selected_text(&self.settings_asr_provider)
+
+
+                        ui.label(RichText::new("Voice Model:").color(TEXT_PRIMARY));
+                        egui::ComboBox::from_id_source("asr_model_picker")
+                            .selected_text(&self.settings_asr_model)
                             .show_ui(ui, |ui| {
-                                if ui.selectable_label(self.settings_asr_provider == "Nvidia", "Nvidia").clicked() {
-                                    self.settings_asr_provider = "Nvidia".to_string();
-                                }
-                                if ui.selectable_label(self.settings_asr_provider == "Deepgram", "Deepgram").clicked() {
-                                    self.settings_asr_provider = "Deepgram".to_string();
+                                let models = ["nova-3", "nova-2"];
+                                for m in models {
+                                    ui.selectable_value(&mut self.settings_asr_model, m.to_string(), m);
                                 }
                             });
                         ui.end_row();
 
-                        ui.label(RichText::new("Voice Model:").color(TEXT_PRIMARY));
-                        ui.add(egui::TextEdit::singleline(&mut self.settings_asr_model).desired_width(120.0));
-                        ui.end_row();
+
                     });
 
                 ui.add_space(12.0);
@@ -538,9 +537,7 @@ impl OverlayApp {
                         ui.add(egui::TextEdit::singleline(&mut self.settings_ollama_base_url));
                         ui.end_row();
 
-                        ui.label(RichText::new("Nvidia API:").color(TEXT_PRIMARY));
-                        ui.add(egui::TextEdit::singleline(&mut self.settings_nvidia_key).password(true));
-                        ui.end_row();
+
 
                         ui.label(RichText::new("Deepgram API:").color(TEXT_PRIMARY));
                         ui.add(egui::TextEdit::singleline(&mut self.settings_deepgram_key).password(true));
@@ -617,7 +614,6 @@ impl OverlayApp {
                             if let Err(e) = brido_server::config::save_overlay_settings(
                                 &self.runtime_env,
                                 &self.settings_active_provider,
-                                &self.settings_asr_provider,
                                 &self.settings_asr_model,
                                 &self.settings_openai_key,
                                 &self.settings_anthropic_key,
@@ -625,7 +621,6 @@ impl OverlayApp {
                                 &self.settings_openrouter_key,
                                 &self.settings_ollama_key,
                                 &self.settings_ollama_base_url,
-                                &self.settings_nvidia_key,
                                 &self.settings_deepgram_key,
                                 &self.settings_resume,
                                 &self.settings_jd,
@@ -643,12 +638,10 @@ impl OverlayApp {
                                 self.config.openrouter_api_key = self.settings_openrouter_key.clone();
                                 self.config.ollama_api_key = self.settings_ollama_key.clone();
                                 self.config.ollama_base_url = self.settings_ollama_base_url.clone();
-                                self.config.nvidia_api_key = self.settings_nvidia_key.clone();
                                 self.config.deepgram_api_key = self.settings_deepgram_key.clone();
                                 self.config.resume_text = self.settings_resume.clone();
                                 self.config.job_description_text = self.settings_jd.clone();
                                 self.config.active_provider = self.settings_active_provider.clone();
-                                self.config.asr_provider = self.settings_asr_provider.clone();
                                 self.config.asr_model = self.settings_asr_model.clone();
                                 if let Some(m) = self.settings_models.get(&brido_server::config::ProviderKind::OpenAI) { self.config.openai_model = m.clone(); }
                                 if let Some(m) = self.settings_models.get(&brido_server::config::ProviderKind::Anthropic) { self.config.anthropic_model = m.clone(); }
@@ -708,12 +701,10 @@ impl OverlayApp {
                         self.settings_openrouter_key = self.config.openrouter_api_key.clone();
                         self.settings_ollama_key = self.config.ollama_api_key.clone();
                         self.settings_ollama_base_url = self.config.ollama_base_url.clone();
-                        self.settings_nvidia_key = self.config.nvidia_api_key.clone();
                         self.settings_deepgram_key = self.config.deepgram_api_key.clone();
                         self.settings_resume = self.config.resume_text.clone();
                         self.settings_jd = self.config.job_description_text.clone();
                         self.settings_active_provider = self.config.active_provider.clone();
-                        self.settings_asr_provider = self.config.asr_provider.clone();
                         self.settings_asr_model = self.config.asr_model.clone();
                         self.settings_models.insert(brido_server::config::ProviderKind::OpenAI, self.config.openai_model.clone());
                         self.settings_models.insert(brido_server::config::ProviderKind::Anthropic, self.config.anthropic_model.clone());
@@ -797,7 +788,7 @@ impl eframe::App for OverlayApp {
                 // ── Drag region (title bar replacement) ──────────────
                 let drag_rect = ui.allocate_exact_size(
                     Vec2::new(ui.available_width(), 28.0),
-                    egui::Sense::drag(),
+                    egui::Sense::hover(),
                 );
                 let drag_response = drag_rect.1;
 
@@ -851,6 +842,23 @@ impl eframe::App for OverlayApp {
                     }
                 }
 
+                // Drag Icon
+                let move_rect = egui::Rect::from_min_size(
+                    drag_r.right_top() + egui::vec2(-132.0, 2.0),
+                    Vec2::new(24.0, 24.0),
+                );
+                let move_resp = ui.interact(move_rect, ui.id().with("move"), egui::Sense::drag());
+                ui.painter().text(
+                    move_rect.center(),
+                    egui::Align2::CENTER_CENTER,
+                    "✋",
+                    FontId::new(14.0, FontFamily::Proportional),
+                    if move_resp.hovered() || move_resp.dragged() { TEXT_PRIMARY } else { TEXT_DIM },
+                );
+                if move_resp.dragged() {
+                    ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);
+                }
+
                 // Voice Toggle Icon
                 let voice_rect = egui::Rect::from_min_size(
                     drag_r.right_top() + egui::vec2(-106.0, 2.0),
@@ -888,9 +896,7 @@ impl eframe::App for OverlayApp {
                     }
                 }
 
-                if drag_response.dragged() {
-                    ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);
-                }
+                // Removed overall drag response
 
                 ui.add_space(4.0);
 
