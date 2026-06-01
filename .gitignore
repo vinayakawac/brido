@@ -69,3 +69,6 @@ release_assets/**/*.aab
 release_assets/**/*.exe
 release_assets/**/*.zip
 release_assets/**/*.sha256
+
+# Ignore the whole release_assets directory
+/release_assets/

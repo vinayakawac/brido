@@ -2,19 +2,18 @@ use anyhow::{anyhow, Result};
 use reqwest::Client;
 use serde::Deserialize;
 use tracing::{error, info};
+use tokio_tungstenite::connect_async;
+use tokio_tungstenite::tungstenite::Message;
+use futures_util::{SinkExt, StreamExt};
+use tokio::sync::mpsc;
+use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 
 pub struct VoiceCopilot {
     client: Client,
-    nvidia_api_key: String,
     deepgram_api_key: String,
     resume_text: String,
     job_description: String,
     pub transcript_history: String,
-}
-
-#[derive(Deserialize)]
-struct NvidiaAsrResponse {
-    text: String,
 }
 
 #[derive(Deserialize)]
@@ -37,11 +36,26 @@ struct DeepgramAlternative {
     transcript: String,
 }
 
+#[derive(Deserialize)]
+struct DeepgramWsResponse {
+    is_final: Option<bool>,
+    channel: Option<DeepgramWsChannel>,
+}
+
+#[derive(Deserialize)]
+struct DeepgramWsChannel {
+    alternatives: Option<Vec<DeepgramWsAlternative>>,
+}
+
+#[derive(Deserialize)]
+struct DeepgramWsAlternative {
+    transcript: Option<String>,
+}
+
 impl VoiceCopilot {
-    pub fn new(nvidia_api_key: String, deepgram_api_key: String, resume_text: String, job_description: String) -> Self {
+    pub fn new(deepgram_api_key: String, resume_text: String, job_description: String) -> Self {
         Self {
             client: Client::new(),
-            nvidia_api_key,
             deepgram_api_key,
             resume_text,
             job_description,
@@ -49,48 +63,81 @@ impl VoiceCopilot {
         }
     }
 
-    pub async fn transcribe_chunk(&self, wav_data: &[u8], asr_provider: &str, asr_model: &str) -> Result<String> {
-        if asr_provider == "Deepgram" {
-            self.transcribe_deepgram(wav_data, asr_model).await
-        } else {
-            self.transcribe_nvidia(wav_data, asr_model).await
-        }
+    pub async fn transcribe_chunk(&self, wav_data: &[u8], asr_model: &str) -> Result<String> {
+        self.transcribe_deepgram(wav_data, asr_model).await
     }
 
-    async fn transcribe_nvidia(&self, wav_data: &[u8], asr_model: &str) -> Result<String> {
-        if self.nvidia_api_key.is_empty() {
-            return Err(anyhow!("Nvidia API key is missing"));
-        }
+    pub async fn start_streaming_session(
+        &self,
+        mut audio_rx: mpsc::Receiver<crate::audio::AudioChunk>,
+        tx_transcript: mpsc::Sender<(String, bool)>, // (transcript, is_final)
+    ) -> Result<()> {
+        // Wait for the first chunk to know sample_rate and channels
+        let first_chunk = match audio_rx.recv().await {
+            Some(chunk) => chunk,
+            None => return Err(anyhow!("Audio channel closed before starting")),
+        };
 
-        let url = "https://integrate.api.nvidia.com/v1/audio/transcriptions";
+        let url = format!(
+            "wss://api.deepgram.com/v1/listen?endpointing=500&language=en&model=nova-3&encoding=linear16&sample_rate={}&channels={}",
+            first_chunk.sample_rate, first_chunk.channels
+        );
 
-        let part = reqwest::multipart::Part::bytes(wav_data.to_vec())
-            .file_name("audio.wav")
-            .mime_str("audio/wav")?;
+        let mut request = url.into_client_request()?;
+        request.headers_mut().insert(
+            "Authorization",
+            format!("Token {}", self.deepgram_api_key).parse()?,
+        );
 
-        let model_name = if asr_model.is_empty() { "nvidia/parakeet-tdt-0.6b-v2" } else { asr_model };
+        let (ws_stream, _) = connect_async(request).await?;
+        let (mut write, mut read) = ws_stream.split();
 
-        let form = reqwest::multipart::Form::new()
-            .part("file", part)
-            .text("model", model_name.to_string())
-            .text("language", "en-US");
+        // Send the first chunk
+        write.send(Message::Binary(first_chunk.pcm_data.into())).await?;
 
-        let response = self.client.post(url)
-            .bearer_auth(&self.nvidia_api_key)
-            .multipart(form)
-            .send()
-            .await?;
+        // Spawn a task to forward audio chunks
+        tokio::spawn(async move {
+            while let Some(chunk) = audio_rx.recv().await {
+                if let Err(e) = write.send(Message::Binary(chunk.pcm_data.into())).await {
+                    error!("Failed to send audio to Deepgram: {}", e);
+                    break;
+                }
+            }
+        });
 
-        let status = response.status();
-        let body_text = response.text().await?;
+        // Spawn a task to read responses
+        tokio::spawn(async move {
+            while let Some(msg) = read.next().await {
+                match msg {
+                    Ok(Message::Text(text)) => {
+                        let text_str = text.to_string(); 
+                        if let Ok(parsed) = serde_json::from_str::<DeepgramWsResponse>(&text_str) {
+                            let is_final = parsed.is_final.unwrap_or(false);
+                            let transcript = parsed.channel
+                                .and_then(|c| c.alternatives)
+                                .and_then(|a| a.into_iter().next())
+                                .and_then(|a| a.transcript)
+                                .unwrap_or_default();
+                            
+                            if !transcript.is_empty() {
+                                let _ = tx_transcript.send((transcript, is_final)).await;
+                            }
+                        }
+                    }
+                    Ok(Message::Close(_)) => {
+                        info!("Deepgram connection closed");
+                        break;
+                    }
+                    Err(e) => {
+                        error!("Deepgram read error: {}", e);
+                        break;
+                    }
+                    _ => {}
+                }
+            }
+        });
 
-        if !status.is_success() {
-            error!("Nvidia ASR error: {}", body_text);
-            return Err(anyhow!("Nvidia ASR error: {}", status));
-        }
-
-        let parsed: NvidiaAsrResponse = serde_json::from_str(&body_text)?;
-        Ok(parsed.text)
+        Ok(())
     }
 
     async fn transcribe_deepgram(&self, wav_data: &[u8], asr_model: &str) -> Result<String> {
@@ -98,7 +145,7 @@ impl VoiceCopilot {
             return Err(anyhow!("Deepgram API key is missing"));
         }
 
-        let model_name = if asr_model.is_empty() { "nova-2" } else { asr_model };
+        let model_name = if asr_model.is_empty() { "nova-3" } else { asr_model };
         let url = format!("https://api.deepgram.com/v1/listen?model={}&smart_format=true", model_name);
 
         let response = self.client.post(&url)
