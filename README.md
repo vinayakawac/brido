@@ -20,7 +20,7 @@ Brido is a two-part system:
 
 - A Windows desktop server written in Rust that captures the laptop screen and streams frames over HTTPS/WSS.
 - An Android app written in Kotlin/Compose that receives the stream and requests AI analysis for the latest frame.
-- AI analysis is provider-based and configured with environment variables (OpenAI, Anthropic, Gemini, or OpenRouter).
+- AI analysis is provider-based and configured with environment variables (Gemini, OpenRouter, or Ollama for local models).
 
 ---
 
