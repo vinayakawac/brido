@@ -16,11 +16,15 @@ pub enum OverlayEvent {
     CaptureAndAnalyse,
     ToggleVisibility,
     OpenSettings,
+    ToggleStealth,
+    DirectType,
 }
 
 const HOTKEY_CAPTURE: i32 = 1;
 const HOTKEY_TOGGLE: i32 = 2;
 const HOTKEY_SETTINGS: i32 = 3;
+const HOTKEY_STEALTH: i32 = 4;
+const HOTKEY_DIRECT_TYPE: i32 = 5;
 
 pub fn parse_hotkey(s: &str) -> (HOT_KEY_MODIFIERS, u32) {
     let mut mods = MOD_NOREPEAT;
@@ -100,15 +104,21 @@ pub fn start_hotkey_listener(
     vk_capture_str: &str,
     vk_toggle_str: &str,
     vk_settings_str: &str,
+    vk_stealth_str: &str,
+    vk_direct_type_str: &str,
 ) -> (std::thread::JoinHandle<()>, HotkeyHandle) {
     let (mod_capture, vk_capture) = parse_hotkey(vk_capture_str);
     let (mod_toggle, vk_toggle) = parse_hotkey(vk_toggle_str);
     let (mod_settings, vk_settings) = parse_hotkey(vk_settings_str);
+    let (mod_stealth, vk_stealth) = parse_hotkey(vk_stealth_str);
+    let (mod_direct_type, vk_direct_type) = parse_hotkey(vk_direct_type_str);
     
     // We clone for logging inside the thread
     let cap_str = vk_capture_str.to_string();
     let tog_str = vk_toggle_str.to_string();
     let set_str = vk_settings_str.to_string();
+    let stealth_str = vk_stealth_str.to_string();
+    let direct_type_str = vk_direct_type_str.to_string();
     
     let (tid_tx, tid_rx) = mpsc::channel();
     
@@ -143,6 +153,18 @@ pub fn start_hotkey_listener(
                 tracing::info!("Registered hotkey: {} → open settings", set_str);
             }
 
+            if let Err(e) = RegisterHotKey(None, HOTKEY_STEALTH, mod_stealth, vk_stealth) {
+                tracing::error!("Failed to register stealth hotkey (VK {}): {e}", vk_stealth);
+            } else {
+                tracing::info!("Registered hotkey: {} → toggle stealth", stealth_str);
+            }
+
+            if let Err(e) = RegisterHotKey(None, HOTKEY_DIRECT_TYPE, mod_direct_type, vk_direct_type) {
+                tracing::error!("Failed to register direct type hotkey (VK {}): {e}", vk_direct_type);
+            } else {
+                tracing::info!("Registered hotkey: {} → direct type", direct_type_str);
+            }
+
             let mut msg = MSG::default();
             loop {
                 let ret = GetMessageW(&mut msg, None, 0, 0);
@@ -157,6 +179,8 @@ pub fn start_hotkey_listener(
                         HOTKEY_CAPTURE => Some(OverlayEvent::CaptureAndAnalyse),
                         HOTKEY_TOGGLE => Some(OverlayEvent::ToggleVisibility),
                         HOTKEY_SETTINGS => Some(OverlayEvent::OpenSettings),
+                        HOTKEY_STEALTH => Some(OverlayEvent::ToggleStealth),
+                        HOTKEY_DIRECT_TYPE => Some(OverlayEvent::DirectType),
                         _ => None,
                     };
 
@@ -171,6 +195,8 @@ pub fn start_hotkey_listener(
             let _ = UnregisterHotKey(None, HOTKEY_CAPTURE);
             let _ = UnregisterHotKey(None, HOTKEY_TOGGLE);
             let _ = UnregisterHotKey(None, HOTKEY_SETTINGS);
+            let _ = UnregisterHotKey(None, HOTKEY_STEALTH);
+            let _ = UnregisterHotKey(None, HOTKEY_DIRECT_TYPE);
             tracing::info!("Hotkey listener stopped");
         }
     });

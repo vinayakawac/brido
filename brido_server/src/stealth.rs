@@ -15,11 +15,14 @@ use windows::Win32::UI::WindowsAndMessaging::{
     WS_EX_TOOLWINDOW, WS_EX_APPWINDOW, WS_EX_NOACTIVATE,
     GetForegroundWindow, SetForegroundWindow,
 };
-use windows::Win32::UI::Shell::{DefSubclassProc, SetWindowSubclass};
+use windows::Win32::UI::Shell::{DefSubclassProc, SetWindowSubclass, RemoveWindowSubclass};
 
 /// `WDA_EXCLUDEFROMCAPTURE` (0x00000011) — the window will not be captured by
 /// PrintScreen, BitBlt, DWM thumbnail APIs, or any screen-sharing software.
 const WDA_EXCLUDEFROMCAPTURE: WINDOW_DISPLAY_AFFINITY = WINDOW_DISPLAY_AFFINITY(0x00000011);
+
+/// `WDA_NONE` (0x00000000) — remove capture exclusion
+const WDA_NONE: WINDOW_DISPLAY_AFFINITY = WINDOW_DISPLAY_AFFINITY(0x00000000);
 
 /// `WM_MOUSEACTIVATE` — sent when the user clicks in an inactive window.
 const WM_MOUSEACTIVATE: u32 = 0x0021;
@@ -50,11 +53,6 @@ pub fn apply_stealth(hwnd: isize) {
         }
 
         // ── 2. Window style flags ───────────────────────────────────────
-        // WS_EX_TOOLWINDOW   — hides from Alt-Tab
-        // WS_EX_NOACTIVATE   — clicking the overlay does NOT move focus
-        //                      away from the browser, preventing
-        //                      visibilitychange / blur detection
-        // Remove WS_EX_APPWINDOW just in case.
         let ex_style = GetWindowLongW(handle, GWL_EXSTYLE);
         if ex_style != 0 {
             let mut new_style = ex_style as u32;
@@ -70,15 +68,77 @@ pub fn apply_stealth(hwnd: isize) {
         }
 
         // ── 3. Subclass to intercept WM_MOUSEACTIVATE ──────────────────
-        // Even with WS_EX_NOACTIVATE, some edge-cases can slip through.
-        // Returning MA_NOACTIVATE from WM_MOUSEACTIVATE is the definitive
-        // way to prevent a window from becoming the foreground window.
         let ok = SetWindowSubclass(handle, Some(noactivate_subclass_proc), SUBCLASS_ID, 0);
         if ok.as_bool() {
             tracing::info!("Stealth: WM_MOUSEACTIVATE subclass installed");
         } else {
             tracing::warn!("Stealth: SetWindowSubclass failed — focus-steal protection may be weaker");
         }
+    }
+}
+
+/// Remove stealth from a window.
+pub fn remove_stealth(hwnd: isize) {
+    unsafe {
+        let handle = HWND(hwnd as *mut _);
+        
+        let result = SetWindowDisplayAffinity(handle, WDA_NONE);
+        if let Err(e) = result {
+            tracing::warn!("SetWindowDisplayAffinity(WDA_NONE) failed: {e}");
+        } else {
+            tracing::info!("Stealth: window capture exclusion removed");
+        }
+
+        let ex_style = GetWindowLongW(handle, GWL_EXSTYLE);
+        if ex_style != 0 {
+            let mut new_style = ex_style as u32;
+            new_style &= !WS_EX_TOOLWINDOW.0;
+            new_style &= !WS_EX_NOACTIVATE.0;
+            
+            let _ = SetWindowLongW(handle, GWL_EXSTYLE, new_style as i32);
+            tracing::info!("Stealth: WS_EX_TOOLWINDOW + WS_EX_NOACTIVATE removed");
+        }
+
+        let ok = RemoveWindowSubclass(handle, Some(noactivate_subclass_proc), SUBCLASS_ID);
+        if ok.as_bool() {
+            tracing::info!("Stealth: WM_MOUSEACTIVATE subclass removed");
+        }
+    }
+}
+
+/// Temporarily remove NOACTIVATE flags so the user can type into the window
+/// even when stealth mode is globally active. Does not remove screen capture exclusion.
+pub fn enable_typing(hwnd: isize) {
+    unsafe {
+        let handle = HWND(hwnd as *mut _);
+        
+        let ex_style = GetWindowLongW(handle, GWL_EXSTYLE);
+        if ex_style != 0 {
+            let mut new_style = ex_style as u32;
+            new_style &= !WS_EX_NOACTIVATE.0;
+            let _ = SetWindowLongW(handle, GWL_EXSTYLE, new_style as i32);
+            tracing::info!("Stealth: WS_EX_NOACTIVATE removed temporarily for typing");
+        }
+
+        let _ = RemoveWindowSubclass(handle, Some(noactivate_subclass_proc), SUBCLASS_ID);
+        let _ = SetForegroundWindow(handle);
+    }
+}
+
+/// Restore NOACTIVATE flags after the user finishes typing.
+pub fn disable_typing(hwnd: isize) {
+    unsafe {
+        let handle = HWND(hwnd as *mut _);
+        
+        let ex_style = GetWindowLongW(handle, GWL_EXSTYLE);
+        if ex_style != 0 {
+            let mut new_style = ex_style as u32;
+            new_style |= WS_EX_NOACTIVATE.0;
+            let _ = SetWindowLongW(handle, GWL_EXSTYLE, new_style as i32);
+            tracing::info!("Stealth: WS_EX_NOACTIVATE restored after typing");
+        }
+
+        let _ = SetWindowSubclass(handle, Some(noactivate_subclass_proc), SUBCLASS_ID, 0);
     }
 }
 

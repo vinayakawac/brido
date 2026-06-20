@@ -28,6 +28,8 @@ pub enum AnalysisResult {
         response: String,
         model_used: String,
     },
+    /// Interim streaming text chunk for real-time display.
+    StreamChunk(String),
     /// Analysis failed with an error message.
     Error(String),
 }
@@ -59,6 +61,7 @@ pub struct OverlayApp {
     is_visible: bool,
     error_text: Option<String>,
     stealth_applied: bool,
+    direct_type_active: bool,
     saved_position: Option<egui::Pos2>,
     scroll_to_bottom: bool,
     /// HWND of the window that had focus before the overlay took it.
@@ -67,8 +70,6 @@ pub struct OverlayApp {
 
     // ── Settings UI state ───────────────────────────────────────────────
     show_settings: bool,
-    settings_openai_key: String,
-    settings_anthropic_key: String,
     settings_gemini_key: String,
     settings_openrouter_key: String,
     settings_ollama_key: String,
@@ -82,9 +83,10 @@ pub struct OverlayApp {
     settings_hotkey_capture: String,
     settings_hotkey_toggle: String,
     settings_hotkey_settings: String,
+    settings_hotkey_stealth: String,
+    settings_hotkey_direct_type: String,
+    settings_strict_stealth_mode: bool,
 
-    show_password_openai: bool,
-    show_password_anthropic: bool,
     show_password_gemini: bool,
     show_password_openrouter: bool,
     start_on_startup: bool,
@@ -127,8 +129,6 @@ impl OverlayApp {
             result_rx,
             result_tx,
             rt,
-            settings_openai_key: config.openai_api_key.clone(),
-            settings_anthropic_key: config.anthropic_api_key.clone(),
             settings_gemini_key: config.gemini_api_key.clone(),
             settings_openrouter_key: config.openrouter_api_key.clone(),
             settings_ollama_key: config.ollama_api_key.clone(),
@@ -140,8 +140,6 @@ impl OverlayApp {
             settings_asr_model: config.asr_model.clone(),
             settings_models: {
                 let mut map = std::collections::HashMap::new();
-                map.insert(brido_server::config::ProviderKind::OpenAI, config.openai_model.clone());
-                map.insert(brido_server::config::ProviderKind::Anthropic, config.anthropic_model.clone());
                 map.insert(brido_server::config::ProviderKind::Gemini, config.gemini_model.clone());
                 map.insert(brido_server::config::ProviderKind::OpenRouter, config.openrouter_model.clone());
                 map.insert(brido_server::config::ProviderKind::Ollama, config.ollama_model.clone());
@@ -150,8 +148,9 @@ impl OverlayApp {
             settings_hotkey_capture: strip_ctrl(&config.overlay_hotkey_capture),
             settings_hotkey_toggle: strip_ctrl(&config.overlay_hotkey_toggle),
             settings_hotkey_settings: strip_ctrl(&config.overlay_hotkey_settings),
-            show_password_openai: false,
-            show_password_anthropic: false,
+            settings_hotkey_stealth: strip_ctrl(&config.overlay_hotkey_stealth),
+            settings_hotkey_direct_type: strip_ctrl(&config.overlay_hotkey_direct_type),
+            settings_strict_stealth_mode: config.strict_stealth_mode,
             show_password_gemini: false,
             show_password_openrouter: false,
             start_on_startup: false,
@@ -168,6 +167,7 @@ impl OverlayApp {
             is_visible: true,
             error_text: None,
             stealth_applied: false,
+            direct_type_active: false,
             saved_position: None,
             scroll_to_bottom: false,
             prev_foreground_hwnd: 0,
@@ -239,81 +239,7 @@ impl OverlayApp {
     }
 
     fn toggle_voice_mode(&mut self) {
-        self.voice_mode = !self.voice_mode;
-        
-        if self.voice_mode {
-            self.status_text = "Voice Mode Active".to_string();
-            
-            let (audio_tx, mut audio_rx) = tokio::sync::mpsc::channel(100);
-            
-            let (stop_tx, stop_rx) = std::sync::mpsc::channel();
-            self.audio_stop_tx = Some(stop_tx);
-            
-            let error_tx = self.result_tx.clone();
-            std::thread::spawn(move || {
-                let _capture = match brido_server::audio::AudioCapture::new(audio_tx) {
-                    Ok(c) => c,
-                    Err(e) => {
-                        let _ = error_tx.send(AnalysisResult::Error(format!("Mic error: {}", e)));
-                        return;
-                    }
-                };
-                let _ = stop_rx.recv();
-            });
-            
-            let mut copilot = brido_server::voice_manager::VoiceCopilot::new(
-                self.config.deepgram_api_key.clone(),
-                self.config.resume_text.clone(),
-                self.config.job_description_text.clone(),
-            );
-            
-            let result_tx = self.result_tx.clone();
-            let config = self.config.clone();
-            
-            let (tx_transcript, mut rx_transcript) = tokio::sync::mpsc::channel(100);
-
-            self.voice_copilot_task = Some(self.rt.spawn(async move {
-                if let Err(e) = copilot.start_streaming_session(audio_rx, tx_transcript).await {
-                    let _ = result_tx.send(AnalysisResult::Error(format!("ASR start error: {}", e)));
-                    return;
-                }
-
-                while let Some((transcript, is_final)) = rx_transcript.recv().await {
-                    if is_final {
-                        let _ = result_tx.send(AnalysisResult::Done {
-                            response: format!("[ FINAL ] {}", transcript),
-                            model_used: "Deepgram ASR".to_string(),
-                        });
-                        
-                        match copilot.append_and_generate(&transcript, &config).await {
-                            Ok(Some(answer)) => {
-                                let _ = result_tx.send(AnalysisResult::Done {
-                                    response: answer,
-                                    model_used: "Voice Copilot".to_string(),
-                                });
-                            }
-                            Ok(None) => {}
-                            Err(e) => {
-                                let _ = result_tx.send(AnalysisResult::Error(format!("AI error: {}", e)));
-                            }
-                        }
-                    } else {
-                        let _ = result_tx.send(AnalysisResult::Done {
-                            response: format!("[Interim] {}", transcript),
-                            model_used: "Deepgram ASR".to_string(),
-                        });
-                    }
-                }
-            }));
-        } else {
-            self.status_text = "Voice Mode Disabled".to_string();
-            if let Some(task) = self.voice_copilot_task.take() {
-                task.abort();
-            }
-            if let Some(stop_tx) = self.audio_stop_tx.take() {
-                let _ = stop_tx.send(());
-            }
-        }
+        self.status_text = "In development".to_string();
     }
 
     /// Submit a manual text question (captures screen as context).
@@ -326,6 +252,22 @@ impl OverlayApp {
         }
         self.input_text.clear();
         self.trigger_capture(Some(question));
+
+        if self.direct_type_active {
+            self.direct_type_active = false;
+            use windows::core::PCWSTR;
+            use windows::Win32::UI::WindowsAndMessaging::FindWindowW;
+            unsafe {
+                let title: Vec<u16> = "Brido Overlay\0".encode_utf16().collect();
+                if let Ok(hwnd) = FindWindowW(PCWSTR::null(), PCWSTR(title.as_ptr())) {
+                    if !hwnd.is_invalid() {
+                        if self.config.strict_stealth_mode {
+                            super::stealth::disable_typing(hwnd.0 as isize);
+                        }
+                    }
+                }
+            }
+        }
 
         // Restore focus to the browser/previous window immediately
         super::stealth::restore_focus(self.prev_foreground_hwnd);
@@ -341,6 +283,82 @@ impl OverlayApp {
                     ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
                     self.trigger_capture(None);
                 }
+
+                OverlayEvent::ToggleStealth => {
+                    self.config.strict_stealth_mode = !self.config.strict_stealth_mode;
+                    self.settings_strict_stealth_mode = self.config.strict_stealth_mode;
+                    use windows::core::PCWSTR;
+                    use windows::Win32::UI::WindowsAndMessaging::FindWindowW;
+                    unsafe {
+                        let title: Vec<u16> = "Brido Overlay\0".encode_utf16().collect();
+                        if let Ok(hwnd) = FindWindowW(PCWSTR::null(), PCWSTR(title.as_ptr())) {
+                            if !hwnd.is_invalid() {
+                                if self.config.strict_stealth_mode {
+                                    super::stealth::apply_stealth(hwnd.0 as isize);
+                                    self.status_text = "Stealth Mode ON".to_string();
+                                } else {
+                                    super::stealth::remove_stealth(hwnd.0 as isize);
+                                    self.status_text = "Stealth Mode OFF".to_string();
+                                }
+                            }
+                        }
+                    }
+                    // Persist toggle state
+                    if let Err(e) = brido_server::config::save_overlay_settings(
+                        &self.runtime_env,
+                        &self.config.active_provider,
+                        &self.config.asr_model,
+                        &self.config.gemini_api_key,
+                        &self.config.openrouter_api_key,
+                        &self.config.ollama_api_key,
+                        &self.config.ollama_base_url,
+                        &self.config.deepgram_api_key,
+                        &self.config.resume_text,
+                        &self.config.job_description_text,
+                        &self.config.overlay_hotkey_capture,
+                        &self.config.overlay_hotkey_toggle,
+                        &self.config.overlay_hotkey_settings,
+                        &self.config.overlay_hotkey_stealth,
+                        &self.config.overlay_hotkey_direct_type,
+                        self.config.strict_stealth_mode,
+                        &self.settings_models,
+                    ) {
+                        tracing::error!("Failed to save stealth mode toggle: {}", e);
+                    }
+                    ctx.request_repaint();
+                }
+
+                OverlayEvent::DirectType => {
+                    self.direct_type_active = !self.direct_type_active;
+                    self.is_visible = true;
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+
+                    use windows::core::PCWSTR;
+                    use windows::Win32::UI::WindowsAndMessaging::FindWindowW;
+                    unsafe {
+                        let title: Vec<u16> = "Brido Overlay\0".encode_utf16().collect();
+                        if let Ok(hwnd) = FindWindowW(PCWSTR::null(), PCWSTR(title.as_ptr())) {
+                            if !hwnd.is_invalid() {
+                                if self.direct_type_active {
+                                    if self.config.strict_stealth_mode {
+                                        super::stealth::enable_typing(hwnd.0 as isize);
+                                    }
+                                    // Save foreground window before taking focus
+                                    let fg = super::stealth::get_foreground_window();
+                                    if fg != 0 {
+                                        self.prev_foreground_hwnd = fg;
+                                    }
+                                } else {
+                                    if self.config.strict_stealth_mode {
+                                        super::stealth::disable_typing(hwnd.0 as isize);
+                                    }
+                                    super::stealth::restore_focus(self.prev_foreground_hwnd);
+                                }
+                            }
+                        }
+                    }
+                }
+
                 OverlayEvent::ToggleVisibility => {
                     self.is_visible = !self.is_visible;
                     if self.is_visible {
@@ -369,6 +387,15 @@ impl OverlayApp {
                 OverlayEvent::OpenSettings => {
                     self.show_settings = !self.show_settings;
                     self.show_qr = false;
+                    if self.show_settings && !self.is_visible {
+                        self.is_visible = true;
+                        if let Some(pos) = self.saved_position.take() {
+                            ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(
+                                pos.into(),
+                            ));
+                        }
+                        ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+                    }
                     ctx.request_repaint();
                 }
             }
@@ -387,6 +414,19 @@ impl OverlayApp {
                     self.response_text = response;
                     self.model_used = model_used.clone();
                     self.status_text = format!("✓ {model_used}");
+                    self.error_text = None;
+                    self.scroll_to_bottom = true;
+                }
+                AnalysisResult::StreamChunk(chunk) => {
+                    if self.model_used == "Deepgram ASR" || self.response_text.is_empty() {
+                        // First chunk of an AI response, overwrite the transcript
+                        self.response_text = chunk;
+                        self.model_used = "Voice Copilot".to_string();
+                        self.status_text = "✓ Voice Copilot (streaming)".to_string();
+                    } else {
+                        // Append subsequent chunks
+                        self.response_text.push_str(&chunk);
+                    }
                     self.error_text = None;
                     self.scroll_to_bottom = true;
                 }
@@ -432,14 +472,14 @@ impl OverlayApp {
                 ui.label(RichText::new("Active AI Settings").color(TEXT_SECONDARY));
                 ui.add_space(4.0);
 
-                let mut current_kind = brido_server::config::ProviderKind::from_label(&self.settings_active_provider).unwrap_or(brido_server::config::ProviderKind::OpenAI);
+                let mut current_kind = brido_server::config::ProviderKind::from_label(&self.settings_active_provider).unwrap_or(brido_server::config::ProviderKind::Gemini);
                 
                 egui::Grid::new("provider_picker_grid")
                     .num_columns(2)
                     .spacing([8.0, 8.0])
                     .show(ui, |ui| {
                         ui.label(RichText::new("Provider:").color(TEXT_PRIMARY));
-                        egui::ComboBox::from_id_source("provider_picker")
+                        egui::ComboBox::from_id_salt("provider_picker")
                             .selected_text(current_kind.label())
                             .show_ui(ui, |ui| {
                                 for kind in brido_server::config::ProviderKind::ALL {
@@ -464,7 +504,7 @@ impl OverlayApp {
                             let is_custom = !models.contains(&current_model.as_str());
                             let display_text = if is_custom { "Custom..." } else { &current_model };
                             
-                            egui::ComboBox::from_id_source("model_picker")
+                            egui::ComboBox::from_id_salt("model_picker")
                                 .selected_text(display_text)
                                 .show_ui(ui, |ui| {
                                     for m in &models {
@@ -492,7 +532,7 @@ impl OverlayApp {
 
 
                         ui.label(RichText::new("Voice Model:").color(TEXT_PRIMARY));
-                        egui::ComboBox::from_id_source("asr_model_picker")
+                        egui::ComboBox::from_id_salt("asr_model_picker")
                             .selected_text(&self.settings_asr_model)
                             .show_ui(ui, |ui| {
                                 let models = ["nova-3", "nova-2"];
@@ -513,14 +553,6 @@ impl OverlayApp {
                     .num_columns(2)
                     .spacing([8.0, 8.0])
                     .show(ui, |ui| {
-                        ui.label(RichText::new("OpenAI:").color(TEXT_PRIMARY));
-                        ui.add(egui::TextEdit::singleline(&mut self.settings_openai_key).password(true));
-                        ui.end_row();
-
-                        ui.label(RichText::new("Anthropic:").color(TEXT_PRIMARY));
-                        ui.add(egui::TextEdit::singleline(&mut self.settings_anthropic_key).password(true));
-                        ui.end_row();
-
                         ui.label(RichText::new("Gemini:").color(TEXT_PRIMARY));
                         ui.add(egui::TextEdit::singleline(&mut self.settings_gemini_key).password(true));
                         ui.end_row();
@@ -553,6 +585,9 @@ impl OverlayApp {
                     });
 
                 ui.add_space(12.0);
+                ui.checkbox(&mut self.settings_strict_stealth_mode, "Strict (Stealth) Mode");
+
+                ui.add_space(12.0);
                 ui.label(RichText::new("Hotkeys").color(TEXT_SECONDARY));
                 ui.add_space(4.0);
                 
@@ -571,6 +606,19 @@ impl OverlayApp {
                         ui.horizontal(|ui| {
                             ui.label(RichText::new("Ctrl +").color(TEXT_DIM));
                             ui.add(egui::TextEdit::singleline(&mut self.settings_hotkey_toggle).desired_width(100.0));
+                        });
+                        ui.end_row();
+
+                        ui.label(RichText::new("Toggle Stealth:").color(TEXT_PRIMARY));
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new("Ctrl +").color(TEXT_DIM));
+                            ui.add(egui::TextEdit::singleline(&mut self.settings_hotkey_stealth).desired_width(100.0));
+                        });
+                        ui.end_row();
+                        ui.label(RichText::new("Direct Type:").color(TEXT_PRIMARY));
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new("Ctrl +").color(TEXT_DIM));
+                            ui.add(egui::TextEdit::singleline(&mut self.settings_hotkey_direct_type).desired_width(100.0));
                         });
                         ui.end_row();
                     });
@@ -610,13 +658,13 @@ impl OverlayApp {
                             let capture_full = format!("Ctrl+{}", cap_suffix);
                             let toggle_full = format!("Ctrl+{}", tog_suffix);
                             let settings_full = format!("Ctrl+{}", set_suffix);
+                            let stealth_full = format!("Ctrl+{}", strip_ctrl(&self.settings_hotkey_stealth));
+                            let direct_type_full = format!("Ctrl+{}", strip_ctrl(&self.settings_hotkey_direct_type));
 
                             if let Err(e) = brido_server::config::save_overlay_settings(
                                 &self.runtime_env,
                                 &self.settings_active_provider,
                                 &self.settings_asr_model,
-                                &self.settings_openai_key,
-                                &self.settings_anthropic_key,
                                 &self.settings_gemini_key,
                                 &self.settings_openrouter_key,
                                 &self.settings_ollama_key,
@@ -627,13 +675,14 @@ impl OverlayApp {
                                 &capture_full,
                                 &toggle_full,
                                 &settings_full,
+                                &stealth_full,
+                                &direct_type_full,
+                                self.settings_strict_stealth_mode,
                                 &self.settings_models,
                             ) {
                                 self.error_text = Some(format!("Failed to save settings: {}", e));
                             } else {
                                 // Update config in memory
-                                self.config.openai_api_key = self.settings_openai_key.clone();
-                                self.config.anthropic_api_key = self.settings_anthropic_key.clone();
                                 self.config.gemini_api_key = self.settings_gemini_key.clone();
                                 self.config.openrouter_api_key = self.settings_openrouter_key.clone();
                                 self.config.ollama_api_key = self.settings_ollama_key.clone();
@@ -643,8 +692,6 @@ impl OverlayApp {
                                 self.config.job_description_text = self.settings_jd.clone();
                                 self.config.active_provider = self.settings_active_provider.clone();
                                 self.config.asr_model = self.settings_asr_model.clone();
-                                if let Some(m) = self.settings_models.get(&brido_server::config::ProviderKind::OpenAI) { self.config.openai_model = m.clone(); }
-                                if let Some(m) = self.settings_models.get(&brido_server::config::ProviderKind::Anthropic) { self.config.anthropic_model = m.clone(); }
                                 if let Some(m) = self.settings_models.get(&brido_server::config::ProviderKind::Gemini) { self.config.gemini_model = m.clone(); }
                                 if let Some(m) = self.settings_models.get(&brido_server::config::ProviderKind::OpenRouter) { self.config.openrouter_model = m.clone(); }
                                 if let Some(m) = self.settings_models.get(&brido_server::config::ProviderKind::Ollama) { self.config.ollama_model = m.clone(); }
@@ -652,6 +699,33 @@ impl OverlayApp {
                                 self.config.overlay_hotkey_capture = capture_full;
                                 self.config.overlay_hotkey_toggle = toggle_full;
                                 self.config.overlay_hotkey_settings = settings_full;
+                                self.config.overlay_hotkey_stealth = stealth_full;
+                                self.config.overlay_hotkey_direct_type = direct_type_full;
+                                self.config.strict_stealth_mode = self.settings_strict_stealth_mode;
+                                
+                                if !self.config.strict_stealth_mode {
+                                    use windows::core::PCWSTR;
+                                    use windows::Win32::UI::WindowsAndMessaging::FindWindowW;
+                                    unsafe {
+                                        let title: Vec<u16> = "Brido Overlay\0".encode_utf16().collect();
+                                        if let Ok(hwnd) = FindWindowW(PCWSTR::null(), PCWSTR(title.as_ptr())) {
+                                            if !hwnd.is_invalid() {
+                                                super::stealth::remove_stealth(hwnd.0 as isize);
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    use windows::core::PCWSTR;
+                                    use windows::Win32::UI::WindowsAndMessaging::FindWindowW;
+                                    unsafe {
+                                        let title: Vec<u16> = "Brido Overlay\0".encode_utf16().collect();
+                                        if let Ok(hwnd) = FindWindowW(PCWSTR::null(), PCWSTR(title.as_ptr())) {
+                                            if !hwnd.is_invalid() {
+                                                super::stealth::apply_stealth(hwnd.0 as isize);
+                                            }
+                                        }
+                                    }
+                                }
 
                                 // Restart hotkey listener
                                 if let Some(h) = self.hotkey_handle.take() {
@@ -662,6 +736,8 @@ impl OverlayApp {
                                     &self.config.overlay_hotkey_capture,
                                     &self.config.overlay_hotkey_toggle,
                                     &self.config.overlay_hotkey_settings,
+                                    &self.config.overlay_hotkey_stealth,
+                                    &self.config.overlay_hotkey_direct_type,
                                 );
                                 self.hotkey_handle = Some(new_handle);
                                 
@@ -695,8 +771,6 @@ impl OverlayApp {
                         self.show_settings = false;
                         
                         // Revert form values to match active config on cancel
-                        self.settings_openai_key = self.config.openai_api_key.clone();
-                        self.settings_anthropic_key = self.config.anthropic_api_key.clone();
                         self.settings_gemini_key = self.config.gemini_api_key.clone();
                         self.settings_openrouter_key = self.config.openrouter_api_key.clone();
                         self.settings_ollama_key = self.config.ollama_api_key.clone();
@@ -706,8 +780,6 @@ impl OverlayApp {
                         self.settings_jd = self.config.job_description_text.clone();
                         self.settings_active_provider = self.config.active_provider.clone();
                         self.settings_asr_model = self.config.asr_model.clone();
-                        self.settings_models.insert(brido_server::config::ProviderKind::OpenAI, self.config.openai_model.clone());
-                        self.settings_models.insert(brido_server::config::ProviderKind::Anthropic, self.config.anthropic_model.clone());
                         self.settings_models.insert(brido_server::config::ProviderKind::Gemini, self.config.gemini_model.clone());
                         self.settings_models.insert(brido_server::config::ProviderKind::OpenRouter, self.config.openrouter_model.clone());
                         self.settings_models.insert(brido_server::config::ProviderKind::Ollama, self.config.ollama_model.clone());
@@ -715,6 +787,10 @@ impl OverlayApp {
                         self.settings_hotkey_capture = strip_ctrl(&self.config.overlay_hotkey_capture);
                         self.settings_hotkey_toggle = strip_ctrl(&self.config.overlay_hotkey_toggle);
                         self.settings_hotkey_settings = strip_ctrl(&self.config.overlay_hotkey_settings);
+                        self.settings_hotkey_stealth = strip_ctrl(&self.config.overlay_hotkey_stealth);
+                        self.settings_hotkey_direct_type = strip_ctrl(&self.config.overlay_hotkey_direct_type);
+                        self.settings_strict_stealth_mode = self.config.strict_stealth_mode;
+                        self.error_text = None;
                     }
                 });
             });
@@ -911,7 +987,7 @@ impl eframe::App for OverlayApp {
                                 let dots = match (ctx.cumulative_pass_nr() / 15) % 4 {
                                     0 => ".",
                                     1 => "..",
-                                    2 => "...",
+                                       2 => "...",
                                     _ => "",
                                 };
                                 ui.label(
@@ -993,6 +1069,26 @@ impl eframe::App for OverlayApp {
                                 .desired_width(input_width)
                                 .font(FontId::new(13.0, FontFamily::Proportional)),
                         );
+
+                        if self.direct_type_active {
+                            response.request_focus();
+                            if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                                self.direct_type_active = false;
+                                use windows::core::PCWSTR;
+                                use windows::Win32::UI::WindowsAndMessaging::FindWindowW;
+                                unsafe {
+                                    let title: Vec<u16> = "Brido Overlay\0".encode_utf16().collect();
+                                    if let Ok(hwnd) = FindWindowW(PCWSTR::null(), PCWSTR(title.as_ptr())) {
+                                        if !hwnd.is_invalid() {
+                                            if self.config.strict_stealth_mode {
+                                                super::stealth::disable_typing(hwnd.0 as isize);
+                                            }
+                                            super::stealth::restore_focus(self.prev_foreground_hwnd);
+                                        }
+                                    }
+                                }
+                            }
+                        }
 
                         // Save the foreground window when the text input gains focus
                         // so we can give it back after submission.

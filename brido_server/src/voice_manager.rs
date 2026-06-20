@@ -38,7 +38,10 @@ struct DeepgramAlternative {
 
 #[derive(Deserialize)]
 struct DeepgramWsResponse {
+    #[serde(rename = "type")]
+    msg_type: Option<String>,
     is_final: Option<bool>,
+    speech_final: Option<bool>,
     channel: Option<DeepgramWsChannel>,
 }
 
@@ -79,7 +82,7 @@ impl VoiceCopilot {
         };
 
         let url = format!(
-            "wss://api.deepgram.com/v1/listen?endpointing=500&language=en&model=nova-3&encoding=linear16&sample_rate={}&channels={}",
+            "wss://api.deepgram.com/v1/listen?interim_results=true&endpointing=300&language=en&model=nova-3&encoding=linear16&sample_rate={}&channels={}",
             first_chunk.sample_rate, first_chunk.channels
         );
 
@@ -107,20 +110,54 @@ impl VoiceCopilot {
 
         // Spawn a task to read responses
         tokio::spawn(async move {
+            let mut utterance_buffer = String::new();
+
             while let Some(msg) = read.next().await {
                 match msg {
                     Ok(Message::Text(text)) => {
                         let text_str = text.to_string(); 
                         if let Ok(parsed) = serde_json::from_str::<DeepgramWsResponse>(&text_str) {
+                            let msg_type = parsed.msg_type.as_deref().unwrap_or("");
+                            if msg_type != "Results" {
+                                continue;
+                            }
+
                             let is_final = parsed.is_final.unwrap_or(false);
+                            let speech_final = parsed.speech_final.unwrap_or(false);
                             let transcript = parsed.channel
                                 .and_then(|c| c.alternatives)
                                 .and_then(|a| a.into_iter().next())
                                 .and_then(|a| a.transcript)
                                 .unwrap_or_default();
                             
-                            if !transcript.is_empty() {
-                                let _ = tx_transcript.send((transcript, is_final)).await;
+                            if !is_final {
+                                if !transcript.is_empty() {
+                                    let display_text = if utterance_buffer.is_empty() {
+                                        transcript.clone()
+                                    } else {
+                                        format!("{} {}", utterance_buffer, transcript)
+                                    };
+                                    let _ = tx_transcript.send((display_text, false)).await;
+                                }
+                            } else {
+                                if !transcript.is_empty() {
+                                    if !utterance_buffer.is_empty() {
+                                        utterance_buffer.push(' ');
+                                    }
+                                    utterance_buffer.push_str(&transcript);
+                                }
+                                
+                                if speech_final {
+                                    if !utterance_buffer.is_empty() {
+                                        let _ = tx_transcript.send((utterance_buffer.clone(), true)).await;
+                                        utterance_buffer.clear();
+                                    }
+                                } else {
+                                    // It's a final chunk of a longer sentence, send interim update
+                                    if !utterance_buffer.is_empty() {
+                                        let _ = tx_transcript.send((utterance_buffer.clone(), false)).await;
+                                    }
+                                }
                             }
                         }
                     }
@@ -174,7 +211,7 @@ impl VoiceCopilot {
         Ok(transcript)
     }
 
-    pub async fn append_and_generate(&mut self, new_transcript: &str, config: &crate::config::Config) -> Result<Option<String>> {
+    pub async fn append_and_generate(&mut self, new_transcript: &str, config: &crate::config::Config, tx: tokio::sync::mpsc::Sender<String>) -> Result<Option<String>> {
         if new_transcript.trim().is_empty() {
             return Ok(None);
         }
@@ -190,10 +227,10 @@ impl VoiceCopilot {
             self.transcript_history = self.transcript_history[offset..].to_string();
         }
 
-        self.generate_answer(config).await
+        self.generate_answer(config, tx).await
     }
 
-    async fn generate_answer(&self, config: &crate::config::Config) -> Result<Option<String>> {
+    async fn generate_answer(&self, config: &crate::config::Config, tx: tokio::sync::mpsc::Sender<String>) -> Result<Option<String>> {
         let system_prompt = format!(
             "You are an expert interview copilot assisting a candidate in real-time. \
              Read the ongoing conversation transcript. Identify if an interview question is being asked or a technical topic is being discussed. \
@@ -211,7 +248,7 @@ impl VoiceCopilot {
 
         let manager = crate::model_manager::ModelManager::new(config, &self.client);
 
-        match manager.generate_text(&prompt).await {
+        match manager.generate_text_stream(&prompt, tx).await {
             Ok((response, _model_used)) => Ok(Some(response)),
             Err(e) => Err(anyhow!("AI error: {}", e.message)),
         }
