@@ -59,10 +59,9 @@ The dialog auto-opens only when no provider key exists.
 
 Ensure at least one key is present in `.env.local`:
 
-- `OPENAI_API_KEY`
-- `ANTHROPIC_API_KEY`
 - `GEMINI_API_KEY`
 - `OPENROUTER_API_KEY`
+- `OLLAMA_API_KEY` (if using local models)
 
 After saving key in UI, restart is required before new key is used.
 
