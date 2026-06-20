@@ -72,3 +72,6 @@ release_assets/**/*.sha256
 
 # Ignore the whole release_assets directory
 /release_assets/
+
+# ── Python Scripts ─────────────────────────────────────────────────────────────
+*.py

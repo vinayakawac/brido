@@ -92,8 +92,6 @@ impl AnalyseError {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum ProviderKind {
-    OpenAI,
-    Anthropic,
     Gemini,
     OpenRouter,
     Ollama,
@@ -102,8 +100,6 @@ enum ProviderKind {
 impl ProviderKind {
     fn as_str(self) -> &'static str {
         match self {
-            ProviderKind::OpenAI => "openai",
-            ProviderKind::Anthropic => "anthropic",
             ProviderKind::Gemini => "gemini",
             ProviderKind::OpenRouter => "openrouter",
             ProviderKind::Ollama => "ollama",
@@ -113,8 +109,6 @@ impl ProviderKind {
     fn rank(self) -> u8 {
         match self {
             ProviderKind::OpenRouter => 100,
-            ProviderKind::OpenAI => 95,
-            ProviderKind::Anthropic => 90,
             ProviderKind::Gemini => 85,
             ProviderKind::Ollama => 80,
         }
@@ -140,12 +134,6 @@ impl<'a> ModelManager<'a> {
 
         if let Some(kind) = crate::config::ProviderKind::from_label(&config.active_provider) {
             match kind {
-                crate::config::ProviderKind::OpenAI => {
-                    push_provider(&mut providers, ProviderKind::OpenAI, &config.openai_api_key, &config.openai_base_url, &config.openai_model);
-                }
-                crate::config::ProviderKind::Anthropic => {
-                    push_provider(&mut providers, ProviderKind::Anthropic, &config.anthropic_api_key, &config.anthropic_base_url, &config.anthropic_model);
-                }
                 crate::config::ProviderKind::Gemini => {
                     push_provider(&mut providers, ProviderKind::Gemini, &config.gemini_api_key, &config.gemini_base_url, &config.gemini_model);
                 }
@@ -175,24 +163,6 @@ impl<'a> ModelManager<'a> {
             ));
         }
 
-        if !config.openai_api_key.trim().is_empty() {
-            entries.push((
-                format!("openai:{}", config.openai_model),
-                config.openai_model.clone(),
-                "cloud vision+reasoning".to_string(),
-                10.0,
-            ));
-        }
-
-        if !config.anthropic_api_key.trim().is_empty() {
-            entries.push((
-                format!("anthropic:{}", config.anthropic_model),
-                config.anthropic_model.clone(),
-                "cloud vision+reasoning".to_string(),
-                9.5,
-            ));
-        }
-
         if !config.gemini_api_key.trim().is_empty() {
             entries.push((
                 format!("gemini:{}", config.gemini_model),
@@ -214,7 +184,7 @@ impl<'a> ModelManager<'a> {
         if entries.is_empty() {
             entries.push((
                 "no-provider-configured".to_string(),
-                "set OPENAI_API_KEY / ANTHROPIC_API_KEY / GEMINI_API_KEY / OPENROUTER_API_KEY"
+                "set GEMINI_API_KEY / OPENROUTER_API_KEY"
                     .to_string(),
                 "missing api key".to_string(),
                 0.0,
@@ -362,8 +332,6 @@ impl<'a> ModelManager<'a> {
         prompt: &str,
     ) -> std::result::Result<String, AnalyseError> {
         match provider.kind {
-            ProviderKind::OpenAI => self.call_openai(provider, image_base64, prompt).await,
-            ProviderKind::Anthropic => self.call_anthropic(provider, image_base64, prompt).await,
             ProviderKind::Gemini => self.call_gemini(provider, image_base64, prompt).await,
             ProviderKind::OpenRouter => self.call_openrouter(provider, image_base64, prompt).await,
             ProviderKind::Ollama => self.call_openai(provider, image_base64, prompt).await,
@@ -716,8 +684,6 @@ impl<'a> ModelManager<'a> {
         prompt: &str,
     ) -> std::result::Result<String, AnalyseError> {
         match provider.kind {
-            ProviderKind::OpenAI => self.call_openai_text(provider, prompt).await,
-            ProviderKind::Anthropic => self.call_anthropic_text(provider, prompt).await,
             ProviderKind::Gemini => self.call_gemini_text(provider, prompt).await,
             ProviderKind::OpenRouter => self.call_openrouter_text(provider, prompt).await,
             ProviderKind::Ollama => self.call_openai_text(provider, prompt).await,
@@ -946,6 +912,191 @@ impl<'a> ModelManager<'a> {
 
         Ok(content)
     }
+
+    pub async fn generate_text_stream(
+        &self,
+        prompt: &str,
+        tx: tokio::sync::mpsc::Sender<String>,
+    ) -> std::result::Result<(String, String), AnalyseError> {
+        if self.providers.is_empty() {
+            return Err(AnalyseError::new(AnalyseErrorCode::NoProviderConfigured, "No AI provider configured.", false));
+        }
+
+        let candidate_providers = self.providers.clone();
+        let mut last_error: Option<AnalyseError> = None;
+        let mut attempts: Vec<ProviderAttempt> = Vec::new();
+
+        for provider in candidate_providers {
+            let attempt = self.generate_text_stream_with_provider(&provider, prompt, tx.clone()).await;
+
+            match attempt {
+                Ok(result) if !result.trim().is_empty() => {
+                    let model_used = format!("{}:{}", provider.kind.as_str(), provider.model);
+                    return Ok((result.trim().to_string(), model_used));
+                }
+                Ok(_) => {
+                    let err = AnalyseError::new(AnalyseErrorCode::ProviderReturnedEmpty, format!("{} returned empty", provider.kind.as_str()), true);
+                    attempts.push(ProviderAttempt { provider: provider.kind.as_str().to_string(), model: provider.model.clone(), code: err.code.as_str().to_string(), message: err.message.clone() });
+                    last_error = Some(err);
+                }
+                Err(err) => {
+                    attempts.push(ProviderAttempt { provider: provider.kind.as_str().to_string(), model: provider.model.clone(), code: err.code.as_str().to_string(), message: err.message.clone() });
+                    last_error = Some(err);
+                }
+            }
+        }
+
+        let fallback_msg = last_error.as_ref().map(|err| err.message.clone()).unwrap_or_else(|| "All providers failed.".to_string());
+        Err(AnalyseError::new(AnalyseErrorCode::AllProvidersFailed, fallback_msg, true).with_attempts(attempts))
+    }
+
+    async fn generate_text_stream_with_provider(
+        &self,
+        provider: &ProviderConfig,
+        prompt: &str,
+        tx: tokio::sync::mpsc::Sender<String>,
+    ) -> std::result::Result<String, AnalyseError> {
+        match provider.kind {
+            ProviderKind::OpenRouter | ProviderKind::Ollama => {
+                self.call_openai_text_stream(provider, prompt, tx).await
+            }
+            ProviderKind::Gemini => self.call_gemini_text_stream(provider, prompt, tx).await,
+        }
+    }
+
+    async fn call_openai_text_stream(
+        &self,
+        provider: &ProviderConfig,
+        prompt: &str,
+        tx: tokio::sync::mpsc::Sender<String>,
+    ) -> std::result::Result<String, AnalyseError> {
+        use futures_util::StreamExt;
+        let url = format!("{}/chat/completions", trim_trailing_slash(&provider.base_url));
+        
+        #[derive(serde::Serialize)]
+        struct StreamReq {
+            model: String,
+            messages: Vec<OpenAiMessageText>,
+            temperature: f32,
+            max_tokens: u32,
+            stream: bool,
+        }
+        
+        let body = StreamReq {
+            model: provider.model.clone(),
+            messages: vec![OpenAiMessageText {
+                role: "user".to_string(),
+                content: prompt.to_string(),
+            }],
+            temperature: 0.1,
+            max_tokens: 900,
+            stream: true,
+        };
+
+        let response = self.client.post(url)
+            .bearer_auth(&provider.api_key)
+            .json(&body)
+            .send()
+            .await
+            .map_err(|err| classify_transport_error(provider, err))?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let error_text = response.text().await.unwrap_or_default();
+            return Err(classify_http_error(provider, status, &error_text));
+        }
+
+        let mut stream = response.bytes_stream();
+        let mut buffer = Vec::new();
+        let mut full_response = String::new();
+
+        while let Some(chunk_res) = stream.next().await {
+            if let Ok(bytes) = chunk_res {
+                buffer.extend_from_slice(&bytes);
+                while let Some(pos) = buffer.windows(2).position(|w| w == b"\n\n") {
+                    let event = buffer.drain(..pos + 2).collect::<Vec<_>>();
+                    let event_str = String::from_utf8_lossy(&event);
+                    for line in event_str.lines() {
+                        if line.starts_with("data: ") {
+                            let data = &line["data: ".len()..];
+                            if data.trim() == "[DONE]" { continue; }
+                            if let Ok(parsed) = serde_json::from_str::<OpenAiStreamResponse>(data) {
+                                if let Some(choice) = parsed.choices.first() {
+                                    if let Some(content) = &choice.delta.content {
+                                        full_response.push_str(content);
+                                        let _ = tx.send(content.clone()).await;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Ok(full_response)
+    }
+
+    async fn call_gemini_text_stream(
+        &self,
+        provider: &ProviderConfig,
+        prompt: &str,
+        tx: tokio::sync::mpsc::Sender<String>,
+    ) -> std::result::Result<String, AnalyseError> {
+        use futures_util::StreamExt;
+        let url = format!("{}/models/{}:streamGenerateContent?alt=sse&key={}", 
+            trim_trailing_slash(&provider.base_url), provider.model, provider.api_key);
+            
+        let body = GeminiRequestText {
+            contents: vec![GeminiContentText {
+                parts: vec![GeminiPartText { text: prompt.to_string() }],
+            }],
+            generation_config: GeminiGenerationConfig { temperature: 0.1, max_output_tokens: 900 },
+        };
+
+        let response = self.client.post(url)
+            .json(&body)
+            .send()
+            .await
+            .map_err(|err| classify_transport_error(provider, err))?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let error_text = response.text().await.unwrap_or_default();
+            return Err(classify_http_error(provider, status, &error_text));
+        }
+
+        let mut stream = response.bytes_stream();
+        let mut buffer = Vec::new();
+        let mut full_response = String::new();
+
+        while let Some(chunk_res) = stream.next().await {
+            if let Ok(bytes) = chunk_res {
+                buffer.extend_from_slice(&bytes);
+                while let Some(pos) = buffer.windows(2).position(|w| w == b"\n\n") {
+                    let event = buffer.drain(..pos + 2).collect::<Vec<_>>();
+                    let event_str = String::from_utf8_lossy(&event);
+                    for line in event_str.lines() {
+                        if line.starts_with("data: ") {
+                            let data = &line["data: ".len()..];
+                            if let Ok(parsed) = serde_json::from_str::<GeminiStreamResponse>(data) {
+                                if let Some(candidates) = parsed.candidates {
+                                    if let Some(candidate) = candidates.first() {
+                                        if let Some(part) = candidate.content.parts.first() {
+                                            if let Some(text) = &part.text {
+                                                full_response.push_str(text);
+                                                let _ = tx.send(text.clone()).await;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Ok(full_response)
+    }
 }
 
 fn push_provider(
@@ -979,11 +1130,7 @@ fn merge_prompt(custom_prompt: Option<&str>) -> String {
 fn parse_provider_hint(model_hint: &str) -> Option<ProviderKind> {
     let lower = model_hint.to_lowercase();
 
-    if lower.starts_with("openai:") || lower.contains("gpt") {
-        Some(ProviderKind::OpenAI)
-    } else if lower.starts_with("anthropic:") || lower.contains("claude") {
-        Some(ProviderKind::Anthropic)
-    } else if lower.starts_with("gemini:") || lower.contains("gemini") {
+    if lower.starts_with("gemini:") || lower.contains("gemini") {
         Some(ProviderKind::Gemini)
     } else if lower.starts_with("openrouter:") || lower.contains("openrouter") {
         Some(ProviderKind::OpenRouter)
@@ -1289,4 +1436,24 @@ struct GeminiContentText {
 #[derive(Serialize)]
 struct GeminiPartText {
     text: String,
+}
+
+#[derive(Deserialize)]
+struct OpenAiStreamResponse {
+    choices: Vec<OpenAiStreamChoice>,
+}
+
+#[derive(Deserialize)]
+struct OpenAiStreamChoice {
+    delta: OpenAiStreamDelta,
+}
+
+#[derive(Deserialize)]
+struct OpenAiStreamDelta {
+    content: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct GeminiStreamResponse {
+    candidates: Option<Vec<GeminiCandidate>>,
 }

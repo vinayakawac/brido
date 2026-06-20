@@ -13,13 +13,9 @@ const ENV_TEMPLATE: &str = "# Brido AI provider configuration\n\
 # This file is created automatically on first run.\n\
 # Keep this file private. Do not commit it to git.\n\
 \n\
-OPENAI_API_KEY=\n\
-OPENAI_BASE_URL=https://api.openai.com/v1\n\
-OPENAI_MODEL=gpt-4.1-mini\n\
-\n\
-ANTHROPIC_API_KEY=\n\
-ANTHROPIC_BASE_URL=https://api.anthropic.com/v1\n\
-ANTHROPIC_MODEL=claude-3-5-sonnet-latest\n\
+GEMINI_API_KEY=\n\
+GEMINI_BASE_URL=https://generativelanguage.googleapis.com/v1beta\n\
+GEMINI_MODEL=gemini-2.0-flash\n\
 \n\
 GEMINI_API_KEY=\n\
 GEMINI_BASE_URL=https://generativelanguage.googleapis.com/v1beta\n\
@@ -43,13 +39,7 @@ ASR_MODEL=nova-3\n\
 ";
 
 
-const MANAGED_ENV_KEYS: [&str; 23] = [
-    "OPENAI_API_KEY",
-    "OPENAI_BASE_URL",
-    "OPENAI_MODEL",
-    "ANTHROPIC_API_KEY",
-    "ANTHROPIC_BASE_URL",
-    "ANTHROPIC_MODEL",
+const MANAGED_ENV_KEYS: [&str; 17] = [
     "GEMINI_API_KEY",
     "GEMINI_BASE_URL",
     "GEMINI_MODEL",
@@ -77,12 +67,6 @@ pub struct Config {
     pub capture_quality: u8,
     pub target_width: u32,
     pub target_height: u32,
-    pub openai_api_key: String,
-    pub openai_base_url: String,
-    pub openai_model: String,
-    pub anthropic_api_key: String,
-    pub anthropic_base_url: String,
-    pub anthropic_model: String,
     pub gemini_api_key: String,
     pub gemini_base_url: String,
     pub gemini_model: String,
@@ -100,13 +84,14 @@ pub struct Config {
     pub overlay_hotkey_capture: String,
     pub overlay_hotkey_toggle: String,
     pub overlay_hotkey_settings: String,
+    pub overlay_hotkey_stealth: String,
+    pub overlay_hotkey_direct_type: String,
+    pub strict_stealth_mode: bool,
 }
 
 impl Config {
     pub fn has_any_provider_key(&self) -> bool {
-        !self.openai_api_key.trim().is_empty()
-            || !self.anthropic_api_key.trim().is_empty()
-            || !self.gemini_api_key.trim().is_empty()
+        !self.gemini_api_key.trim().is_empty()
             || !self.openrouter_api_key.trim().is_empty()
             || !self.ollama_api_key.trim().is_empty()
     }
@@ -121,12 +106,6 @@ impl Default for Config {
             capture_quality: 65,
             target_width: 1280,
             target_height: 720,
-            openai_api_key: env::var("OPENAI_API_KEY").unwrap_or_default(),
-            openai_base_url: env_or_default("OPENAI_BASE_URL", "https://api.openai.com/v1"),
-            openai_model: env_or_default("OPENAI_MODEL", "gpt-4.1-mini"),
-            anthropic_api_key: env::var("ANTHROPIC_API_KEY").unwrap_or_default(),
-            anthropic_base_url: env_or_default("ANTHROPIC_BASE_URL", "https://api.anthropic.com/v1"),
-            anthropic_model: env_or_default("ANTHROPIC_MODEL", "claude-3-5-sonnet-latest"),
             gemini_api_key: env::var("GEMINI_API_KEY").unwrap_or_default(),
             gemini_base_url: env_or_default("GEMINI_BASE_URL", "https://generativelanguage.googleapis.com/v1beta"),
             gemini_model: env_or_default("GEMINI_MODEL", "gemini-2.0-flash"),
@@ -144,6 +123,9 @@ impl Default for Config {
             overlay_hotkey_capture: env_or_default("OVERLAY_HOTKEY_CAPTURE", "Ctrl+Shift+Space"),
             overlay_hotkey_toggle: env_or_default("OVERLAY_HOTKEY_TOGGLE", "Ctrl+`"),
             overlay_hotkey_settings: env_or_default("OVERLAY_HOTKEY_SETTINGS", "Ctrl+Shift+,"),
+            overlay_hotkey_stealth: env_or_default("OVERLAY_HOTKEY_STEALTH", "Ctrl+Space"),
+            overlay_hotkey_direct_type: env_or_default("OVERLAY_HOTKEY_DIRECT_TYPE", "Ctrl+."),
+            strict_stealth_mode: env::var("STRICT_STEALTH_MODE").unwrap_or_else(|_| "true".to_string()) == "true",
         }
     }
 }
@@ -157,17 +139,13 @@ fn env_or_default(key: &str, fallback: &str) -> String {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub enum ProviderKind {
-    OpenAI,
-    Anthropic,
     Gemini,
     OpenRouter,
     Ollama,
 }
 
 impl ProviderKind {
-    pub const ALL: [ProviderKind; 5] = [
-        ProviderKind::OpenAI,
-        ProviderKind::Anthropic,
+    pub const ALL: [ProviderKind; 3] = [
         ProviderKind::Gemini,
         ProviderKind::OpenRouter,
         ProviderKind::Ollama,
@@ -175,8 +153,6 @@ impl ProviderKind {
 
     pub fn label(self) -> &'static str {
         match self {
-            ProviderKind::OpenAI => "OpenAI",
-            ProviderKind::Anthropic => "Anthropic",
             ProviderKind::Gemini => "Gemini",
             ProviderKind::OpenRouter => "OpenRouter",
             ProviderKind::Ollama => "Ollama",
@@ -185,8 +161,6 @@ impl ProviderKind {
 
     pub fn from_label(label: &str) -> Option<Self> {
         match label {
-            "OpenAI" => Some(ProviderKind::OpenAI),
-            "Anthropic" => Some(ProviderKind::Anthropic),
             "Gemini" => Some(ProviderKind::Gemini),
             "OpenRouter" => Some(ProviderKind::OpenRouter),
             "Ollama" => Some(ProviderKind::Ollama),
@@ -196,8 +170,6 @@ impl ProviderKind {
 
     pub fn api_key_var(self) -> &'static str {
         match self {
-            ProviderKind::OpenAI => "OPENAI_API_KEY",
-            ProviderKind::Anthropic => "ANTHROPIC_API_KEY",
             ProviderKind::Gemini => "GEMINI_API_KEY",
             ProviderKind::OpenRouter => "OPENROUTER_API_KEY",
             ProviderKind::Ollama => "OLLAMA_API_KEY",
@@ -206,8 +178,6 @@ impl ProviderKind {
 
     pub fn base_url_var(self) -> &'static str {
         match self {
-            ProviderKind::OpenAI => "OPENAI_BASE_URL",
-            ProviderKind::Anthropic => "ANTHROPIC_BASE_URL",
             ProviderKind::Gemini => "GEMINI_BASE_URL",
             ProviderKind::OpenRouter => "OPENROUTER_BASE_URL",
             ProviderKind::Ollama => "OLLAMA_BASE_URL",
@@ -216,8 +186,6 @@ impl ProviderKind {
 
     pub fn model_var(self) -> &'static str {
         match self {
-            ProviderKind::OpenAI => "OPENAI_MODEL",
-            ProviderKind::Anthropic => "ANTHROPIC_MODEL",
             ProviderKind::Gemini => "GEMINI_MODEL",
             ProviderKind::OpenRouter => "OPENROUTER_MODEL",
             ProviderKind::Ollama => "OLLAMA_MODEL",
@@ -226,8 +194,6 @@ impl ProviderKind {
 
     pub fn default_base_url(self) -> &'static str {
         match self {
-            ProviderKind::OpenAI => "https://api.openai.com/v1",
-            ProviderKind::Anthropic => "https://api.anthropic.com/v1",
             ProviderKind::Gemini => "https://generativelanguage.googleapis.com/v1beta",
             ProviderKind::OpenRouter => "https://openrouter.ai/api/v1",
             ProviderKind::Ollama => "http://127.0.0.1:11434/v1",
@@ -236,8 +202,6 @@ impl ProviderKind {
 
     pub fn default_model(self) -> &'static str {
         match self {
-            ProviderKind::OpenAI => "gpt-4o-mini",
-            ProviderKind::Anthropic => "claude-3-5-sonnet-latest",
             ProviderKind::Gemini => "gemini-2.5-flash",
             ProviderKind::OpenRouter => "google/gemini-2.5-flash:free",
             ProviderKind::Ollama => "llama3.2-vision",
@@ -246,8 +210,6 @@ impl ProviderKind {
 
     pub fn available_models(self) -> Vec<&'static str> {
         match self {
-            ProviderKind::OpenAI => vec!["gpt-4o", "gpt-4o-mini", "o1-mini", "o1-preview", "gpt-4.1-mini", "gpt-5"],
-            ProviderKind::Anthropic => vec!["claude-3-7-sonnet-latest", "claude-3-5-sonnet-latest", "claude-3-opus-latest", "claude-3-5-haiku-latest"],
             ProviderKind::Gemini => vec!["gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.0-flash", "gemini-2.0-pro-exp"],
             ProviderKind::OpenRouter => vec![
                 "google/gemini-2.5-flash:free",
@@ -458,8 +420,6 @@ pub fn save_overlay_settings(
     runtime: &RuntimeEnvPaths,
     active_provider: &str,
     asr_model: &str,
-    openai: &str,
-    anthropic: &str,
     gemini: &str,
     openrouter: &str,
     ollama: &str,
@@ -470,6 +430,9 @@ pub fn save_overlay_settings(
     hotkey_capture: &str,
     hotkey_toggle: &str,
     hotkey_settings: &str,
+    hotkey_stealth: &str,
+    hotkey_direct_type: &str,
+    strict_stealth_mode: bool,
     models: &std::collections::HashMap<ProviderKind, String>,
 ) -> Result<(), EnvConfigError> {
     ensure_env_file_exists(&runtime.active_env_path)?;
@@ -480,8 +443,6 @@ pub fn save_overlay_settings(
 
     upsert_env_line(&mut lines, "ACTIVE_PROVIDER", active_provider.trim());
     upsert_env_line(&mut lines, "ASR_MODEL", asr_model.trim());
-    upsert_env_line(&mut lines, "OPENAI_API_KEY", openai.trim());
-    upsert_env_line(&mut lines, "ANTHROPIC_API_KEY", anthropic.trim());
     upsert_env_line(&mut lines, "GEMINI_API_KEY", gemini.trim());
     upsert_env_line(&mut lines, "OPENROUTER_API_KEY", openrouter.trim());
     upsert_env_line(&mut lines, "OLLAMA_API_KEY", ollama.trim());
@@ -492,9 +453,10 @@ pub fn save_overlay_settings(
     upsert_env_line(&mut lines, "OVERLAY_HOTKEY_CAPTURE", hotkey_capture.trim());
     upsert_env_line(&mut lines, "OVERLAY_HOTKEY_TOGGLE", hotkey_toggle.trim());
     upsert_env_line(&mut lines, "OVERLAY_HOTKEY_SETTINGS", hotkey_settings.trim());
+    upsert_env_line(&mut lines, "OVERLAY_HOTKEY_STEALTH", hotkey_stealth.trim());
+    upsert_env_line(&mut lines, "OVERLAY_HOTKEY_DIRECT_TYPE", hotkey_direct_type.trim());
+    upsert_env_line(&mut lines, "STRICT_STEALTH_MODE", if strict_stealth_mode { "true" } else { "false" });
 
-    if let Some(m) = models.get(&ProviderKind::OpenAI) { upsert_env_line(&mut lines, "OPENAI_MODEL", m); }
-    if let Some(m) = models.get(&ProviderKind::Anthropic) { upsert_env_line(&mut lines, "ANTHROPIC_MODEL", m); }
     if let Some(m) = models.get(&ProviderKind::Gemini) { upsert_env_line(&mut lines, "GEMINI_MODEL", m); }
     if let Some(m) = models.get(&ProviderKind::OpenRouter) { upsert_env_line(&mut lines, "OPENROUTER_MODEL", m); }
     if let Some(m) = models.get(&ProviderKind::Ollama) { upsert_env_line(&mut lines, "OLLAMA_MODEL", m); }
@@ -621,22 +583,8 @@ fn sanitize_api_key(value: &str) -> Result<String, EnvConfigError> {
 
 fn validate_provider_key(provider: ProviderKind, api_key: &str) -> Result<(), EnvConfigError> {
     match provider {
-        ProviderKind::OpenAI => {
-            if !api_key.starts_with("sk-") || api_key.len() < 20 {
-                return Err(EnvConfigError::Validation(
-                    "OpenAI API key should start with 'sk-' and look complete.".to_string(),
-                ));
-            }
-        }
-        ProviderKind::Anthropic => {
-            if api_key.len() < 16 {
-                return Err(EnvConfigError::Validation(
-                    "Anthropic API key looks too short.".to_string(),
-                ));
-            }
-        }
         ProviderKind::Gemini => {
-            if api_key.len() < 16 {
+            if api_key.len() < 30 {
                 return Err(EnvConfigError::Validation(
                     "Gemini API key looks too short.".to_string(),
                 ));

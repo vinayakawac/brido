@@ -101,6 +101,8 @@ fn main() {
         &cfg.overlay_hotkey_capture,
         &cfg.overlay_hotkey_toggle,
         &cfg.overlay_hotkey_settings,
+        &cfg.overlay_hotkey_stealth,
+        &cfg.overlay_hotkey_direct_type,
     );
 
     // ── Background Server ────────────────────────────────────────────
@@ -115,6 +117,8 @@ fn main() {
     let port = cfg.port;
 
     // ── Build the overlay app ────────────────────────────────────────
+    let is_stealth = cfg.strict_stealth_mode;
+
     let app = window::OverlayApp::new(
         hotkey_tx,
         hotkey_rx,
@@ -142,6 +146,7 @@ fn main() {
         ..Default::default()
     };
 
+
     eframe::run_native(
         "Brido Overlay",
         native_options,
@@ -149,7 +154,9 @@ fn main() {
             // Apply stealth after the window is created.
             // eframe doesn't expose the raw HWND directly, so we find
             // our window by title using FindWindowW.
-            apply_stealth_by_title();
+            if is_stealth {
+                apply_stealth_by_title();
+            }
 
             Ok(Box::new(app))
         }),
