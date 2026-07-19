@@ -124,6 +124,24 @@ header {
   background: var(--code-bg);
 }
 
+.kofi-header-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: opacity var(--transition), transform var(--transition);
+}
+
+.kofi-header-link img {
+  height: 1.5rem;
+  width: auto;
+  display: block;
+}
+
+.kofi-header-link:hover {
+  opacity: 0.85;
+  transform: scale(1.05);
+}
+
 .docs-link {
   display: inline-flex;
   align-items: center;
@@ -575,6 +593,12 @@ footer {
   width: 1px;
   height: 0.875rem;
   background: var(--border);
+}
+
+.footer-right {
+  display: flex;
+  align-items: center;
+  gap: 1.25rem;
 }
 
 .footer-right a {
