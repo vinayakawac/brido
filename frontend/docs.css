@@ -362,3 +362,12 @@ details[open] summary::after {
   }
 }
 
+@media (max-width: 640px) {
+  .sidebar {
+    padding: 0.875rem 1rem;
+    margin-left: -1rem;
+    margin-right: -1rem;
+  }
+}
+
+
