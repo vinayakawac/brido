@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Brido Documentation — Stream &amp; Analyse</title>
+    <meta name="description" content="Detailed guide on installation, phone pairing, AI provider configurations, stealth mode flags, hotkeys, and troubleshooting for the Brido screen analysis system.">
+    <link rel="icon" type="image/x-icon" href="../brido.ico">
+    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="docs.css">
+    <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+</head>
+<body>
+
+    <!-- Header -->
+    <header>
+        <div class="container header-inner">
+            <a href="index.html" class="logo">Brido</a>
+            <div style="display: flex; align-items: center; gap: 1.25rem;">
+                <a href="docs.html" class="docs-link active">Docs</a>
+                <a href="https://github.com/vinayakawac/brido" class="github-link" target="_blank" rel="noopener">
+                    <i data-lucide="github"></i>
+                    GitHub
+                </a>
+            </div>
+        </div>
+    </header>
+
+    <div class="container docs-layout">
+        
+        <!-- Sidebar Navigation -->
+        <aside class="sidebar">
+            <span class="sidebar-label">ON THIS PAGE</span>
+            <nav class="sidebar-nav">
+                <a href="#install">Install</a>
+                <a href="#pair">Pair your phone</a>
+                <a href="#analyse">Analyse a screen</a>
+                <a href="#providers">Configure AI providers</a>
+                <a href="#stealth">Stealth mode</a>
+                <a href="#hotkeys">Hotkeys</a>
+                <a href="#releases">Release artifacts</a>
+                <a href="#errors">Error reference</a>
+                <a href="#troubleshooting">Troubleshooting</a>
+            </nav>
+        </aside>
+
+        <!-- Main Content Area -->
+        <article class="docs-content">
+
+            <!-- Section 1: Install -->
+            <section id="install">
+                <h2>Install</h2>
+                <p>Brido is a two-part utility consisting of a lightweight Windows desktop server written in Rust and an Android companion app written in Kotlin. The system contains no account registration or baked-in API keys &mdash; it operates completely within your local network, using AI models powered by your own API configurations.</p>
+                <p>To run the server from source, clone the repository and execute the following commands in PowerShell:</p>
+                <div class="terminal-block"># download the latest release
+cd brido_server && cargo run --release
+# the egui window opens — QR code + PIN appear instantly</div>
+                <p>Alternatively, you can run the standalone prebuilt server binary downloaded from GitHub releases:</p>
+                <div class="terminal-block"># or grab the prebuilt exe from GitHub Releases
+brido-server-v1.0.1.exe</div>
+            </section>
+
+            <!-- Section 2: Pair -->
+            <section id="pair">
+                <h2>Pair your phone</h2>
+                <p>To view your stream and perform analysis, install the Android APK on a physical phone connected to the exact same Wi-Fi network as your laptop. Launch the app and point your phone's camera at the QR code displayed on the server GUI. Pairing completes in seconds, exchanging a self-signed TLS handshake and saving a session token.</p>
+                <p>If the camera fails to scan or you want to connect manually, enter the server's IP address and the active 6-digit PIN shown on the server window. The connection URI uses the following schema:</p>
+                <div class="terminal-block"># QR encodes this URI — scan or enter manually
+brido://&lt;your-local-ip&gt;:&lt;port&gt;:&lt;6-digit-pin&gt;</div>
+            </section>
+
+            <!-- Section 3: Analyse -->
+            <section id="analyse">
+                <h2>Analyse a screen</h2>
+                <p>Once paired, the Windows server uses DXGI to capture desktop frames, encode them as JPEG, and push them at 15 fps over a secure WebSocket (WSS) link. The phone acts as a companion display. Tap the <strong>anAlyse</strong> button inside the app to capture the active frame. The phone resizes and encodes the frame, sending it to the server API for evaluation.</p>
+                <p>You can also capture and analyze without touching your phone. The server registers global Windows hotkeys. Pressing the capture hotkey (default <code>Ctrl+Shift+Space</code>) captures the active screen section and triggers immediate analysis directly on your computer, displaying results in an on-screen overlay.</p>
+                <p>The Android client triggers analysis by firing a REST request to the server endpoint:</p>
+                <div class="terminal-block">POST /api/analyse
+Content-Type: application/json
+{ "image_b64": "...", "model_hint": "gemini-2.0-flash" }</div>
+            </section>
+
+            <!-- Section 4: Providers -->
+            <section id="providers">
+                <h2>Configure AI providers</h2>
+                <p>On first launch with no API keys set, the server opens a configuration dialog to setup your provider. Alternatively, you can edit or create a <code>.env.local</code> file in the folder containing your executable. If running from a read-only directory (such as Program Files), the server automatically falls back to reading/writing configurations at <code>%APPDATA%/Brido/.env.local</code>.</p>
+                
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Provider</th>
+                            <th>Environment Variable Key</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>Gemini</td>
+                            <td class="font-mono">GEMINI_API_KEY</td>
+                        </tr>
+                        <tr>
+                            <td>OpenRouter</td>
+                            <td class="font-mono">OPENROUTER_API_KEY</td>
+                        </tr>
+                        <tr>
+                            <td>OpenAI</td>
+                            <td class="font-mono">OPENAI_API_KEY</td>
+                        </tr>
+                        <tr>
+                            <td>Anthropic</td>
+                            <td class="font-mono">ANTHROPIC_API_KEY</td>
+                        </tr>
+                        <tr>
+                            <td>Ollama (Local)</td>
+                            <td class="font-mono">OLLAMA_BASE_URL &amp; OLLAMA_API_KEY</td>
+                        </tr>
+                    </tbody>
+                </table>
+
+                <p>The server routes requests through configured providers using a built-in failover order: <strong>OpenRouter &rarr; OpenAI &rarr; Anthropic &rarr; Gemini &rarr; Ollama</strong>. To force a specific provider, pass a <code>model_hint</code> in the request payload containing part of the model identifier (e.g. <code>gemini</code> or <code>gpt-4</code>).</p>
+            </section>
+
+            <!-- Section 5: Stealth -->
+            <section id="stealth">
+                <h2>Stealth mode</h2>
+                <p>Stealth mode applies native Windows API flags to the overlay window, protecting your session integrity. These configurations are built specifically to bypass proctoring tools and screen monitors during educational practice sessions.</p>
+                <ul class="bullet-list">
+                    <li><strong>WDA_EXCLUDEFROMCAPTURE</strong> &mdash; Excludes the overlay from capturing APIs. The window is rendered completely black or invisible in screenshots, OBS studio records, Zoom/Teams screen sharing, and proctoring capture streams.</li>
+                    <li><strong>WS_EX_NOACTIVATE</strong> &mdash; Bypasses window activation. The overlay never steals OS keyboard or mouse focus when clicked or opened, meaning browser <code>visibilitychange</code> and <code>blur</code> events are never fired.</li>
+                    <li><strong>WS_EX_TOOLWINDOW</strong> &mdash; Removes the overlay window from the Windows Alt-Tab task switcher.</li>
+                </ul>
+                <p>Toggle stealth mode options inside the server GUI settings panel (⚙) or by using the global stealth hotkey (default <code>Ctrl+Shift+S</code>).</p>
+            </section>
+
+            <!-- Section 6: Hotkeys -->
+            <section id="hotkeys">
+                <h2>Hotkeys</h2>
+                <p>All global hotkeys are registered at the system level via the Win32 API. They remain active even when the Brido server window is minimized to the system tray. Keys can be customized from the settings panel.</p>
+                
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Action</th>
+                            <th>Default Hotkey</th>
+                            <th>Configurable</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>Capture &amp; analyse</td>
+                            <td class="font-mono">Ctrl+Shift+Space</td>
+                            <td>Yes</td>
+                        </tr>
+                        <tr>
+                            <td>Toggle visibility</td>
+                            <td class="font-mono">Ctrl+Shift+H</td>
+                            <td>Yes</td>
+                        </tr>
+                        <tr>
+                            <td>Open settings</td>
+                            <td class="font-mono">Ctrl+Shift+O</td>
+                            <td>Yes</td>
+                        </tr>
+                        <tr>
+                            <td>Toggle stealth</td>
+                            <td class="font-mono">Ctrl+Shift+S</td>
+                            <td>Yes</td>
+                        </tr>
+                        <tr>
+                            <td>Direct type</td>
+                            <td class="font-mono">Ctrl+Shift+D</td>
+                            <td>Yes</td>
+                        </tr>
+                    </tbody>
+                </table>
+                <p>Note: All hotkeys must use a <code>Ctrl+</code> modifier prefix. Changes made in the settings GUI take effect immediately without requiring a server reboot.</p>
+            </section>
+
+            <!-- Section 7: Releases -->
+            <section id="releases">
+                <h2>Release artifacts</h2>
+                <p>Every version tag (<code>v*</code>) pushed to the GitHub repository automatically compiles and deploys binaries and bundles through a automated GitHub Actions workflow. These release assets include:</p>
+                <ul class="bullet-list">
+                    <li><strong>brido-server-&lt;tag&gt;.exe</strong> &mdash; Standalone compiled Windows server binary. Can be run directly without any dependencies.</li>
+                    <li><strong>brido-server-&lt;tag&gt;-bundle.zip</strong> &mdash; Comprehensive zip archive containing the server executable, sample environment configurations (<code>.env.local.template</code>), and documentation.</li>
+                    <li><strong>brido-android-debug-&lt;tag&gt;.apk</strong> &mdash; Standard debug Android package, suitable for local installation and testing.</li>
+                    <li><strong>brido-android-release-&lt;tag&gt;.apk</strong> &mdash; Production release package, signed with the repository keystore.</li>
+                </ul>
+            </section>
+
+            <!-- Section 8: Error Reference -->
+            <section id="errors">
+                <h2>Error reference</h2>
+                <p>Common errors returned by the server API or displayed in the Android client terminal panel during operation.</p>
+
+                <!-- Error Card 1 -->
+                <div class="error-card">
+                    <div class="terminal-block">HTTP 401: unauthorized</div>
+                    <div class="error-label cause">Cause:</div>
+                    <div class="error-body">The session token is either missing, invalid, or expired. This usually happens if the server was restarted after the phone paired, invalidating all previous token UUIDs stored in memory.</div>
+                    <div class="error-label fix">Fix:</div>
+                    <div class="error-body">Disconnect from the Android app and re-connect (either by scanning the fresh QR code or typing in the new PIN) to generate a new valid session token.</div>
+                </div>
+
+                <!-- Error Card 2 -->
+                <div class="error-card">
+                    <div class="terminal-block">HTTP 413: image_payload_too_large</div>
+                    <div class="error-label cause">Cause:</div>
+                    <div class="error-body">The captured screen image size exceeded the maximum upload payload limit defined on the Axum server configuration.</div>
+                    <div class="error-body">The client will automatically attempt to downsize and compress the frame quality (from 1440p &rarr; 1024p &rarr; 768p) on failure, but extreme resolutions may still trigger this.</div>
+                    <div class="error-label fix">Fix:</div>
+                    <div class="error-body">Configure lower default capture dimensions or reduction settings in the Android app viewmodel settings, or lower the quality parameter (q=65) in the server's DXGI capture thread.</div>
+                </div>
+
+                <!-- Error Card 3 -->
+                <div class="error-card">
+                    <div class="terminal-block">HTTP 422: model_unsupported_image_input</div>
+                    <div class="error-label cause">Cause:</div>
+                    <div class="error-body">The active model routed on the provider upstream (e.g. OpenRouter) is text-only and does not support image or multimodal inputs. This results in the API provider throwing an error indicating no multimodal endpoints found.</div>
+                    <div class="error-label fix">Fix:</div>
+                    <div class="error-body">Verify that your configured model name supports vision capabilities. Switch to a vision-capable model (like <code>gemini-2.0-flash</code>, <code>gpt-4o-mini</code>, or <code>claude-3-5-sonnet</code>) and re-submit the request.</div>
+                </div>
+
+                <!-- Error Card 4 -->
+                <div class="error-card">
+                    <div class="terminal-block">HTTP 429: provider_rate_limited</div>
+                    <div class="error-label cause">Cause:</div>
+                    <div class="error-body">You have hit the request quota or rate limit of your active AI provider. This is common when utilizing free-tier API endpoints (such as OpenRouter's free models or Google AI Studio's free Gemini API limits).</div>
+                    <div class="error-label fix">Fix:</div>
+                    <div class="error-body">Wait a few seconds before requesting analysis again. If limits are hit repeatedly, configure alternative API keys in <code>.env.local</code> to enable automatic failover routing, or upgrade your API tier.</div>
+                </div>
+
+                <!-- Error Card 5 -->
+                <div class="error-card">
+                    <div class="terminal-block">HTTP 502: provider_auth_failed / all_providers_failed</div>
+                    <div class="error-label cause">Cause:</div>
+                    <div class="error-body">The API key, base URL, or model identifier configured inside <code>.env.local</code> is invalid, or the server failed to authenticate requests with the upstream providers.</div>
+                    <div class="error-label fix">Fix:</div>
+                    <div class="error-body">Double-check your keys inside the server configuration GUI (or check the local <code>.env.local</code> file). Make sure keys contain no leading/trailing spaces or quotes. Check your internet connection.</div>
+                </div>
+
+                <!-- Error Card 6 -->
+                <div class="error-card">
+                    <div class="terminal-block">HTTP 503: no_provider_configured</div>
+                    <div class="error-label cause">Cause:</div>
+                    <div class="error-body">The server has no active AI provider credentials set. The `.env.local` file is empty or is missing valid API keys for Gemini, OpenRouter, OpenAI, or Anthropic.</div>
+                    <div class="error-label fix">Fix:</div>
+                    <div class="error-body">Click the **Configure AI** button in the server GUI window, input a valid API key for your chosen provider, click save, and restart the server application.</div>
+                </div>
+
+            </section>
+
+            <!-- Section 9: Troubleshooting -->
+            <section id="troubleshooting">
+                <h2>Troubleshooting</h2>
+                <p>Step-by-step debugging flows for the most common failure modes.</p>
+
+                <!-- Issue 1 -->
+                <details>
+                    <summary>Port 8080 already in use</summary>
+                    <div class="details-body">
+                        <ol>
+                            <li>Verify if another instance of Brido or another web server is already running on port 8080.</li>
+                            <li>Open PowerShell as Administrator and run the following command to terminate any process currently holding port 8080:
+                                <div class="terminal-block">Get-NetTCPConnection -LocalPort 8080 -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force }</div>
+                            </li>
+                            <li>Restart the server from the GUI controls.</li>
+                        </ol>
+                    </div>
+                </details>
+
+                <!-- Issue 2 -->
+                <details>
+                    <summary>Server starts but IP Address shows "unknown"</summary>
+                    <div class="details-body">
+                        <ol>
+                            <li>Ensure your laptop is connected to an active local network interface (Wi-Fi or Ethernet).</li>
+                            <li>Restart the server to allow the local IP discovery mechanism to bind to the active network socket.</li>
+                            <li>If running multiple virtual network adapters (VPNs, Docker, Hyper-V), disable them temporarily to ensure Brido detects the correct physical LAN adapter.</li>
+                        </ol>
+                    </div>
+                </details>
+
+                <!-- Issue 3 -->
+                <details>
+                    <summary>Screen capture initialization failed</summary>
+                    <div class="details-body">
+                        <ol>
+                            <li>Make sure the Windows server is running in a local, physical desktop session.</li>
+                            <li>Do not run the server within a headless VM or unsupported Windows Remote Desktop Protocol (RDP) sessions, as the DXGI desktop capture API requires an active physical display context.</li>
+                            <li>If you must use RDP, try VNC or alternative remote solutions that maintain active local session rendering.</li>
+                        </ol>
+                    </div>
+                </details>
+
+                <!-- Issue 4 -->
+                <details>
+                    <summary>Overlay window does not reappear after hiding</summary>
+                    <div class="details-body">
+                        <ol>
+                            <li>Press your configured toggle hotkey combination again (default is <code>Ctrl+Shift+H</code>). The same key operates as both hide and show.</li>
+                            <li>Double-click the Brido icon inside the system tray (bottom-right taskbar section) to force-restore the GUI window.</li>
+                            <li>Alternatively, right-click the system tray icon and select <strong>Open</strong> to force coordinates recalculation and bring the window back to screen bounds.</li>
+                        </ol>
+                    </div>
+                </details>
+
+                <!-- Issue 5 -->
+                <details>
+                    <summary>Hotkey does not work at all</summary>
+                    <div class="details-body">
+                        <ol>
+                            <li>Run the Brido server executable as Administrator to give the global keyboard listener higher execution rights.</li>
+                            <li>Check for software conflicts with other active keyboard listeners, macro programs, or hotkey managers (e.g. AutoHotkey, PowerToys, or keyboard overlay controls).</li>
+                            <li>Verify the application registered the keys by checking the server startup logs for hotkey binding success confirmation.</li>
+                        </ol>
+                    </div>
+                </details>
+
+                <!-- Issue 6 -->
+                <details>
+                    <summary>QR scanner tab crashes or camera does not open on phone</summary>
+                    <div class="details-body">
+                        <ol>
+                            <li>Open the Android settings panel on your phone.</li>
+                            <li>Go to <strong>Apps &rarr; Brido</strong> and check your application permission settings.</li>
+                            <li>Explicitly enable <strong>Camera</strong> permissions for the application, then force-close and relaunch the app.</li>
+                        </ol>
+                    </div>
+                </details>
+
+                <!-- Issue 7 -->
+                <details>
+                    <summary>Connected to server but stream shows "waiting for frames"</summary>
+                    <div class="details-body">
+                        <ol>
+                            <li>Confirm that the server is active and the GUI says "Running" status.</li>
+                            <li>Create a Windows Firewall rule in PowerShell as Administrator to allow incoming connections on port 8080:
+                                <div class="terminal-block">New-NetFirewallRule -DisplayName "Brido" -Direction Inbound -Protocol TCP -LocalPort 8080 -Action Allow</div>
+                            </li>
+                            <li>Verify that your phone and laptop are connected to the exact same Wi-Fi SSID, and that router AP isolation is turned off.</li>
+                        </ol>
+                    </div>
+                </details>
+
+                <!-- Issue 8 -->
+                <details>
+                    <summary>Cannot reach server in manual entry mode</summary>
+                    <div class="details-body">
+                        <ol>
+                            <li>Double-check the server IP address and PIN shown on the server desktop UI window.</li>
+                            <li>Verify that both devices are on the same Wi-Fi connection.</li>
+                            <li>Open your phone's web browser and navigate to <code>https://&lt;SERVER_IP&gt;:8080/api/qr-info</code>. Accept the self-signed TLS certificate warning to allow OkHttp to connect.</li>
+                        </ol>
+                    </div>
+                </details>
+
+            </section>
+
+        </article>
+    </div>
+
+    <!-- Footer -->
+    <footer>
+        <div class="container footer-inner">
+            <div class="footer-left">
+                <span>&copy; 2026 Brido Project</span>
+                <div class="footer-sep"></div>
+                <span>Apache License 2.0</span>
+            </div>
+            <div class="footer-right">
+                <a href="https://github.com/vinayakawac/brido" target="_blank" rel="noopener">
+                    <i data-lucide="github"></i>
+                    View on GitHub
+                </a>
+            </div>
+        </div>
+    </footer>
+
+    <!-- Sidebar Scroll Observer & Icon Setup -->
+    <script>
+        lucide.createIcons();
+
+        // Intersection Observer to mark active sidebar section
+        const observerOptions = {
+            root: null,
+            rootMargin: '-20% 0px -60% 0px',
+            threshold: 0
+        };
+
+        const sections = document.querySelectorAll('.docs-content section');
+        const navLinks = document.querySelectorAll('.sidebar-nav a');
+
+        const observer = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    const activeId = entry.target.getAttribute('id');
+                    navLinks.forEach(link => {
+                        if (link.getAttribute('href') === `#${activeId}`) {
+                            link.classList.add('active');
+                        } else {
+                            link.classList.remove('active');
+                        }
+                    });
+                }
+            });
+        }, observerOptions);
+
+        sections.forEach(section => observer.observe(section));
+    </script>
+
+</body>
+</html>

@@ -1,0 +1,340 @@
+/* ============================================================
+   Brido — Documentation Stylesheet
+   ============================================================ */
+
+/* ── Layout ────────────────────────────────────────────────── */
+.docs-layout {
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  gap: 0;
+  align-items: start;
+  min-height: calc(100vh - 3.5rem);
+}
+
+/* ── Sticky Sidebar ────────────────────────────────────────── */
+.sidebar {
+  position: sticky;
+  top: 3.5rem;
+  height: calc(100vh - 3.5rem);
+  padding: 3rem 1.5rem 3rem 0;
+  border-right: 1px solid var(--border);
+  overflow-y: auto;
+}
+
+.sidebar-label {
+  display: block;
+  font-family: var(--mono);
+  font-size: 0.65rem;
+  font-weight: 700;
+  color: var(--text-3);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  margin-bottom: 1.25rem;
+}
+
+.sidebar-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 0.875rem;
+}
+
+.sidebar-nav a {
+  font-family: var(--font-body);
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--text-2);
+  transition: color var(--transition);
+  line-height: 1.3;
+}
+
+.sidebar-nav a:hover {
+  color: var(--text-1);
+}
+
+.sidebar-nav a.active {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* ── Content Area ──────────────────────────────────────────── */
+.docs-content {
+  max-width: 760px;
+  padding: 3rem 2rem 5rem 3.5rem;
+}
+
+.docs-content section {
+  padding: 0;
+  margin-bottom: 5.5rem;
+  scroll-margin-top: 5.5rem; /* avoids sticky header collision */
+}
+
+.docs-content h2 {
+  font-family: var(--font-head);
+  font-size: 1.625rem;
+  font-weight: 800;
+  letter-spacing: -0.04em;
+  color: var(--text-1);
+  margin-bottom: 1.25rem;
+  display: flex;
+  align-items: center;
+}
+
+.docs-content h2::before {
+  content: '●';
+  color: var(--accent);
+  font-size: 0.6rem;
+  vertical-align: middle;
+  margin-right: 0.625rem;
+  display: inline-block;
+}
+
+.docs-content p {
+  font-family: var(--font-body);
+  font-size: 0.9375rem;
+  color: var(--text-2);
+  margin-bottom: 1.5rem;
+  line-height: 1.7;
+}
+
+.docs-content p strong {
+  color: var(--text-1);
+}
+
+/* ── Terminal block with Copy label ────────────────────────── */
+.terminal-block {
+  font-family: var(--mono);
+  font-size: 0.825rem;
+  background: var(--code-bg);
+  border: 1px solid var(--border);
+  color: var(--text-2);
+  padding: 1.125rem 1.375rem;
+  border-radius: var(--radius);
+  margin-bottom: 1.5rem;
+  position: relative;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+  line-height: 1.6;
+}
+
+.terminal-block::before {
+  content: 'copy';
+  float: right;
+  font-family: var(--mono);
+  font-size: 0.65rem;
+  color: var(--text-3);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  cursor: pointer;
+  user-select: none;
+  margin-left: 1rem;
+  transition: color var(--transition);
+}
+
+.terminal-block:hover::before {
+  color: var(--accent);
+}
+
+/* ── Table Styling ─────────────────────────────────────────── */
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1.75rem 0 2.25rem;
+}
+
+th {
+  text-align: left;
+  font-family: var(--font-body);
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: var(--text-3);
+  border-bottom: 1px solid var(--border);
+  padding: 0.625rem 1rem;
+}
+
+td {
+  font-family: var(--font-body);
+  font-size: 0.875rem;
+  color: var(--text-2);
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--border);
+  line-height: 1.5;
+}
+
+td.font-mono {
+  font-family: var(--mono);
+  font-size: 0.825rem;
+}
+
+td code {
+  font-family: var(--mono);
+  font-size: 0.825rem;
+  background: var(--code-bg);
+  border: 1px solid var(--border);
+  color: var(--accent);
+  padding: 0.1rem 0.45em;
+  border-radius: 2px;
+}
+
+/* ── Bullet Lists (Mono arrow) ─────────────────────────────── */
+.bullet-list {
+  list-style: none;
+  margin-bottom: 1.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.bullet-list li {
+  display: flex;
+  gap: 0.625rem;
+  align-items: flex-start;
+  font-size: 0.9rem;
+  color: var(--text-2);
+  line-height: 1.6;
+}
+
+.bullet-list li::before {
+  content: '→';
+  font-family: var(--mono);
+  color: var(--accent);
+  flex-shrink: 0;
+  font-weight: bold;
+}
+
+.bullet-list li strong {
+  color: var(--text-1);
+}
+
+/* ── Error reference section ───────────────────────────────── */
+.error-card {
+  padding: 1.5rem 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.error-card:last-child {
+  border-bottom: none;
+}
+
+.error-card .terminal-block {
+  margin-bottom: 0.875rem;
+}
+
+.error-label {
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  margin-bottom: 0.25rem;
+  margin-top: 0.75rem;
+}
+
+.error-label.cause {
+  color: var(--yellow);
+}
+
+.error-label.fix {
+  color: var(--accent);
+}
+
+.error-body {
+  font-size: 0.875rem;
+  color: var(--text-2);
+  line-height: 1.65;
+}
+
+/* ── Troubleshooting Accordion ─────────────────────────────── */
+details {
+  border: 1px solid var(--border);
+  margin-bottom: 0.625rem;
+  background: var(--surface);
+  transition: border-color var(--transition);
+}
+
+details[open] {
+  border-color: var(--accent);
+}
+
+summary {
+  padding: 1.125rem 1.375rem;
+  cursor: pointer;
+  list-style: none;
+  font-family: var(--font-head);
+  font-size: 0.9375rem;
+  font-weight: 700;
+  color: var(--text-1);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  user-select: none;
+}
+
+/* Hide native details arrow on webkit */
+summary::-webkit-details-marker {
+  display: none;
+}
+
+summary::after {
+  content: '›';
+  color: var(--text-3);
+  font-size: 1.25rem;
+  font-weight: bold;
+  line-height: 1;
+  transition: transform 0.15s ease, color 0.15s ease;
+}
+
+details[open] summary::after {
+  transform: rotate(90deg);
+  color: var(--accent);
+}
+
+.details-body {
+  padding: 0 1.375rem 1.375rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.02);
+  padding-top: 1.125rem;
+}
+
+.details-body ol {
+  padding-left: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.details-body li {
+  font-size: 0.875rem;
+  color: var(--text-2);
+  line-height: 1.7;
+}
+
+.details-body li .terminal-block {
+  margin-top: 0.75rem;
+  margin-bottom: 0.25rem;
+}
+
+/* ── Responsive ────────────────────────────────────────────── */
+@media (max-width: 900px) {
+  .docs-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .sidebar {
+    position: static;
+    height: auto;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+    padding: 2rem 0;
+  }
+
+  .sidebar-nav {
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 1rem;
+  }
+
+  .docs-content {
+    padding: 3rem 0;
+  }
+}
