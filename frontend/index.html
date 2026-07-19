@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Brido — AI Screen Analysis for Tests &amp; Technical Interviews</title>
+    <meta name="description"
+        content="Stream your Windows screen to your Android phone over local Wi-Fi. Get on-demand AI analysis during coding tests, technical interviews, and exams.">
+    <link rel="icon" type="image/x-icon" href="../brido.ico">
+    <link rel="stylesheet" href="styles.css">
+    <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+</head>
+
+<body>
+
+    <!-- Header -->
+    <header>
+        <div class="container header-inner">
+            <a href="index.html" class="logo">Brido</a>
+            <div style="display: flex; align-items: center; gap: 1.25rem;">
+                <a href="docs.html" class="docs-link">Docs</a>
+                <a href="https://github.com/vinayakawac/brido" class="github-link" target="_blank" rel="noopener">
+                    <i data-lucide="github"></i>
+                    GitHub
+                </a>
+            </div>
+        </div>
+    </header>
+
+    <main>
+
+        <!-- Hero -->
+        <section class="hero">
+            <div class="container">
+                <div class="badge">Open Source &middot; Free &middot; Apache 2.0</div>
+                <h1>Your screen,<br>analyzed by <em>AI</em>,<br>on your phone.</h1>
+                <p class="hero-desc">
+                    Stream your Windows screen to your Android phone over local Wi-Fi.
+                    Tap once for instant AI analysis of any problem on screen —
+                    coding questions, MCQs, debugging sessions.
+                    Invisible to proctoring tools. No tab-switch detection. No cloud relay.
+                </p>
+                <div class="cta-group">
+                    <a href="https://github.com/vinayakawac/brido/releases" class="btn btn-primary" target="_blank"
+                        rel="noopener">
+                        <i data-lucide="monitor-down"></i>
+                        Download for Windows
+                    </a>
+                    <a href="https://github.com/vinayakawac/brido/releases" class="btn btn-secondary" target="_blank"
+                        rel="noopener">
+                        <i data-lucide="smartphone"></i>
+                        Get the APK
+                    </a>
+                </div>
+                <div class="terminal-block">
+                    <span class="prompt"># start the server</span><br>
+                    cd brido_server &amp;&amp; cargo run --release<br>
+                    <span class="prompt"># QR code + PIN appear in the egui window</span>
+                </div>
+            </div>
+        </section>
+
+        <!-- Use Cases -->
+        <section class="use-cases">
+            <div class="container">
+                <div class="section-header">
+                    <span class="section-label">Applications</span>
+                    <h2>Built for focused<br>problem solving</h2>
+                    <p>AI assistance one tap away — without breaking your session or your focus.</p>
+                </div>
+                <div class="use-cases-grid">
+                    <div class="use-case-card">
+                        <span class="uc-num">USE CASE 01</span>
+                        <h3>Online Coding Tests</h3>
+                        <p>Stream the test tab to your phone. Tap <strong>Analyse</strong> to get AI hints, approach
+                            suggestions, and edge-case breakdowns — without touching the browser or switching tabs.</p>
+                    </div>
+                    <div class="use-case-card">
+                        <span class="uc-num">USE CASE 02</span>
+                        <h3>Technical Interviews</h3>
+                        <p>Keep the interview window in focus. The Brido overlay is excluded from screen share and
+                            Alt-Tab — your interviewer never sees it while you get real-time AI guidance on your phone.
+                        </p>
+                    </div>
+                    <div class="use-case-card">
+                        <span class="uc-num">USE CASE 03</span>
+                        <h3>Exam &amp; MCQ Practice</h3>
+                        <p>Run Brido alongside practice platforms. Stream MCQs, logic puzzles, or diagrams and use AI
+                            analysis to understand the underlying concept, not just the answer.</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- How It Works -->
+        <section class="how-it-works">
+            <div class="container">
+                <div class="section-header">
+                    <span class="section-label">Setup</span>
+                    <h2>Three steps to AI<br>analysis on your phone</h2>
+                    <p>From install to live stream in under two minutes.</p>
+                </div>
+                <div class="steps-grid">
+                    <div class="step-card">
+                        <span class="step-num">STEP 01</span>
+                        <h3>Launch the Server</h3>
+                        <p>Run the Rust server on your Windows laptop. The egui window shows your QR code, local IP, and
+                            a randomly generated 6-digit PIN. Minimise to tray — it keeps running silently in the
+                            background.</p>
+                    </div>
+                    <div class="step-card">
+                        <span class="step-num">STEP 02</span>
+                        <h3>Pair Your Phone</h3>
+                        <p>Open the Android app and scan the QR code — or type the IP and PIN manually. A secure WSS
+                            connection starts immediately. Your laptop screen appears live on your phone.</p>
+                    </div>
+                    <div class="step-card">
+                        <span class="step-num">STEP 03</span>
+                        <h3>Tap anAlyse</h3>
+                        <p>The current screen frame is sent to the server, processed by your configured AI provider
+                            (Gemini, OpenRouter, Ollama, or others), and the response appears in the terminal panel
+                            instantly.</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Platform Features -->
+        <section class="platform">
+            <div class="container">
+                <div class="section-header">
+                    <span class="section-label">Architecture</span>
+                    <h2>Two components,<br>one local network</h2>
+                    <p>No cloud relay. No account. No subscription. Configure AI providers via the GUI or
+                        <code>.env.local</code>.</p>
+                </div>
+                <div class="platform-cols">
+
+                    <!-- Windows Server -->
+                    <div class="platform-col">
+                        <div class="platform-col-header">
+                            <i data-lucide="monitor"></i>
+                            <div>
+                                <h3>Windows Server</h3>
+                                <div class="stack-tag">Rust · axum · egui · HTTPS / WSS</div>
+                            </div>
+                        </div>
+                        <ul class="feature-list">
+                            <li><span><strong>DXGI screen capture</strong> at 15 fps, resized to 720p, JPEG-encoded at
+                                    quality 65, broadcast over WebSocket to all connected clients.</span></li>
+                            <li><span><strong>egui desktop GUI</strong> with QR code, IP, and PIN display. Minimises to
+                                    system tray; double-click tray icon to restore.</span></li>
+                            <li><span><strong>Multi-provider AI</strong> with priority failover: OpenRouter → OpenAI →
+                                    Anthropic → Gemini → Ollama. Model hint per request overrides priority.</span></li>
+                            <li><span><strong>Hotkey overlay</strong> <code>Ctrl+Shift+Space</code>: captures the screen
+                                    and runs AI analysis without switching windows or lifting focus from the active
+                                    app.</span></li>
+                            <li><span><strong>Tab-switch detection bypass</strong>: the overlay uses
+                                    <code>WS_EX_NOACTIVATE</code> so <code>visibilitychange</code> and <code>blur</code>
+                                    events used by proctoring sites never fire.</span></li>
+                            <li><span><strong>Stealth mode</strong>: <code>WDA_EXCLUDEFROMCAPTURE</code> hides the
+                                    overlay from OBS and screen-share; <code>WS_EX_TOOLWINDOW</code> removes it from
+                                    Alt-Tab.</span></li>
+                            <li><span><strong>TLS + PIN auth</strong>: self-signed cert via rcgen, fresh 6-digit PIN
+                                    each restart, UUID session tokens stored in memory only.</span></li>
+                            <li><span><strong>First-run setup prompt</strong>: opens automatically when no API key is
+                                    configured. Supports OpenAI, Anthropic, Gemini, OpenRouter, and local Ollama.</span>
+                            </li>
+                        </ul>
+                    </div>
+
+                    <!-- Android App -->
+                    <div class="platform-col">
+                        <div class="platform-col-header">
+                            <i data-lucide="smartphone"></i>
+                            <div>
+                                <h3>Android App</h3>
+                                <div class="stack-tag">Kotlin · Jetpack Compose · Material 3 · WSS</div>
+                            </div>
+                        </div>
+                        <ul class="feature-list">
+                            <li><span><strong>QR pairing</strong> via CameraX + ML Kit, or manual IP + PIN entry.
+                                    Connects in seconds on the same Wi-Fi.</span></li>
+                            <li><span><strong>Live stream viewer</strong>: receives binary JPEG frames over WSS and
+                                    displays them in real time using Compose image composables.</span></li>
+                            <li><span><strong>anAlyse button</strong>: takes the latest frame, compresses it with
+                                    adaptive quality presets (1440p → 1024p → 768p), and POSTs to
+                                    <code>/api/analyse</code>.</span></li>
+                            <li><span><strong>Retry logic</strong>: automatically downsizes and retries on 413, 429,
+                                    502, 503, 504, or generic 5xx errors before surfacing a failure.</span></li>
+                            <li><span><strong>Terminal panel</strong>: scrollable output pane that renders the AI
+                                    response, model used, and status lines alongside the stream viewer.</span></li>
+                            <li><span><strong>Model selector</strong>: fetches available providers from
+                                    <code>/api/models</code> and passes a model hint with each analysis request.</span>
+                            </li>
+                            <li><span><strong>Trust-all TLS</strong>: accepts the server's self-signed certificate on
+                                    the local LAN without manual certificate installation.</span></li>
+                            <li><span><strong>diScoNnect</strong> returns to the connection screen; session token is
+                                    cleared and stream stops immediately.</span></li>
+                        </ul>
+                    </div>
+
+                </div>
+            </div>
+        </section>
+
+    </main>
+
+    <!-- Footer -->
+    <footer>
+        <div class="container footer-inner">
+            <div class="footer-left">
+                <span>Apache License 2.0</span>
+            </div>
+            <div class="footer-right">
+                <a href="https://github.com/vinayakawac/brido" target="_blank" rel="noopener">
+                    <i data-lucide="github"></i>
+                    View on GitHub
+                </a>
+            </div>
+        </div>
+    </footer>
+
+    <script>lucide.createIcons();</script>
+
+</body>
+
+</html>
