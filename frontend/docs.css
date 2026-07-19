@@ -100,39 +100,9 @@
   color: var(--text-1);
 }
 
-/* ── Terminal block with Copy label ────────────────────────── */
+/* ── Terminal block layout in docs ─────────────────────────── */
 .terminal-block {
-  font-family: var(--mono);
-  font-size: 0.825rem;
-  background: var(--code-bg);
-  border: 1px solid var(--border);
-  color: var(--text-2);
-  padding: 1.125rem 1.375rem;
-  border-radius: var(--radius);
   margin-bottom: 1.5rem;
-  position: relative;
-  overflow-x: auto;
-  white-space: pre-wrap;
-  word-break: break-all;
-  line-height: 1.6;
-}
-
-.terminal-block::before {
-  content: 'copy';
-  float: right;
-  font-family: var(--mono);
-  font-size: 0.65rem;
-  color: var(--text-3);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  cursor: pointer;
-  user-select: none;
-  margin-left: 1rem;
-  transition: color var(--transition);
-}
-
-.terminal-block:hover::before {
-  color: var(--accent);
 }
 
 /* ── Table Styling ─────────────────────────────────────────── */
@@ -187,9 +157,8 @@ td code {
 }
 
 .bullet-list li {
-  display: flex;
-  gap: 0.625rem;
-  align-items: flex-start;
+  position: relative;
+  padding-left: 1.25rem;
   font-size: 0.9rem;
   color: var(--text-2);
   line-height: 1.6;
@@ -197,9 +166,11 @@ td code {
 
 .bullet-list li::before {
   content: '→';
+  position: absolute;
+  left: 0;
+  top: 0;
   font-family: var(--mono);
   color: var(--accent);
-  flex-shrink: 0;
   font-weight: bold;
 }
 
@@ -218,7 +189,13 @@ td code {
 }
 
 .error-card .terminal-block {
+  margin-top: 0.5rem;
   margin-bottom: 0.875rem;
+  padding: 0.625rem 1rem;
+  font-size: 0.8rem;
+  color: var(--red);
+  background: rgba(239, 83, 80, 0.05);
+  border-color: rgba(239, 83, 80, 0.25);
 }
 
 .error-label {
@@ -310,8 +287,9 @@ details[open] summary::after {
 }
 
 .details-body li .terminal-block {
-  margin-top: 0.75rem;
+  margin-top: 0.5rem;
   margin-bottom: 0.25rem;
+  font-size: 0.8rem;
 }
 
 /* ── Responsive ────────────────────────────────────────────── */

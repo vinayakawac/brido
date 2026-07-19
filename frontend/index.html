@@ -33,30 +33,59 @@
         <!-- Hero -->
         <section class="hero">
             <div class="container">
-                <div class="badge">Open Source &middot; Free &middot; Apache 2.0</div>
-                <h1>Your screen,<br>analyzed by <em>AI</em>,<br>on your phone.</h1>
-                <p class="hero-desc">
-                    Stream your Windows screen to your Android phone over local Wi-Fi.
-                    Tap once for instant AI analysis of any problem on screen —
-                    coding questions, MCQs, debugging sessions.
-                    Invisible to proctoring tools. No tab-switch detection. No cloud relay.
-                </p>
-                <div class="cta-group">
-                    <a href="https://github.com/vinayakawac/brido/releases" class="btn btn-primary" target="_blank"
-                        rel="noopener">
-                        <i data-lucide="monitor-down"></i>
-                        Download for Windows
-                    </a>
-                    <a href="https://github.com/vinayakawac/brido/releases" class="btn btn-secondary" target="_blank"
-                        rel="noopener">
-                        <i data-lucide="smartphone"></i>
-                        Get the APK
-                    </a>
+                <div class="hero-inner-grid">
+                    <div class="hero-text-side">
+                        <div class="badge">Open Source &middot; Free &middot; Apache 2.0</div>
+                        <h1>Your screen,<br>analyzed by <em>AI</em>,<br>on your phone.</h1>
+                        <p class="hero-desc">
+                            Stream your Windows screen to your Android phone over local Wi-Fi.
+                            Tap once for instant AI analysis of any problem on screen —
+                            coding questions, MCQs, debugging sessions.
+                            Invisible to proctoring tools. No tab-switch detection. No cloud relay.
+                        </p>
+                        <div class="cta-group">
+                            <div class="cta-item">
+                                <a id="win-download-btn" href="https://github.com/vinayakawac/brido/releases" class="btn btn-primary" target="_blank"
+                                    rel="noopener">
+                                    <i data-lucide="monitor-down"></i>
+                                    Download for Windows
+                                </a>
+                                <span class="cta-subtext">voice capture under development</span>
+                            </div>
+                            <div class="cta-item">
+                                <a id="apk-download-btn" href="https://github.com/vinayakawac/brido/releases" class="btn btn-secondary" target="_blank"
+                                    rel="noopener">
+                                    <i data-lucide="smartphone"></i>
+                                    Get the APK
+                                </a>
+                            </div>
+                            <div class="cta-item">
+                                <a href="https://github.com/vinayakawac/brido/releases" class="btn btn-secondary" target="_blank"
+                                    rel="noopener">
+                                    <i data-lucide="history"></i>
+                                    All Releases
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="hero-slider-side">
+                        <div class="slider-wrapper">
+                            <div class="slider-track">
+                                <div class="slide"><img src="main.png" alt="Brido main window dashboard"></div>
+                                <div class="slide"><img src="api_keys.png" alt="Configure API keys dialog"></div>
+                                <div class="slide"><img src="hot_key_custom.png" alt="Hotkey customization screen"></div>
+                            </div>
+                        </div>
+                    </div>
                 </div>
                 <div class="terminal-block">
-                    <span class="prompt"># start the server</span><br>
-                    cd brido_server &amp;&amp; cargo run --release<br>
-                    <span class="prompt"># QR code + PIN appear in the egui window</span>
+                    <div class="terminal-header">
+                        <span class="terminal-title">TERMINAL</span>
+                        <span class="copy-btn">copy</span>
+                    </div>
+                    <div class="terminal-body"><span class="prompt"># clone and build the server</span>
+git clone https://github.com/vinayakawac/brido.git
+cd brido/brido_server &amp;&amp; cargo run --release</div>
                 </div>
             </div>
         </section>
@@ -222,7 +251,54 @@
         </div>
     </footer>
 
-    <script>lucide.createIcons();</script>
+    <script>
+        lucide.createIcons();
+
+        // Auto-sliding carousel for hero screenshots
+        const track = document.querySelector('.slider-track');
+        const slides = document.querySelectorAll('.slide');
+        if (track && slides.length > 0) {
+            let index = 0;
+            setInterval(() => {
+                index = (index + 1) % slides.length;
+                track.style.transform = `translateX(-${index * 100}%)`;
+            }, 2000);
+        }
+
+        // Copy to clipboard functionality
+        document.querySelectorAll('.terminal-block').forEach(block => {
+            const copyBtn = block.querySelector('.copy-btn');
+            const body = block.querySelector('.terminal-body');
+            if (copyBtn && body) {
+                copyBtn.addEventListener('click', () => {
+                    navigator.clipboard.writeText(body.innerText.trim()).then(() => {
+                        copyBtn.textContent = 'copied!';
+                        setTimeout(() => {
+                            copyBtn.textContent = 'copy';
+                        }, 2000);
+                    });
+                });
+            }
+        });
+
+        // Fetch latest release and dynamically set direct download URLs
+        fetch('https://api.github.com/repos/vinayakawac/brido/releases/latest')
+            .then(res => res.json())
+            .then(data => {
+                const tag = data.tag_name;
+                if (tag) {
+                    const winBtn = document.getElementById('win-download-btn');
+                    if (winBtn) {
+                        winBtn.href = `https://github.com/vinayakawac/brido/releases/latest/download/brido-${tag}.exe`;
+                    }
+                    const apkBtn = document.getElementById('apk-download-btn');
+                    if (apkBtn) {
+                        apkBtn.href = `https://github.com/vinayakawac/brido/releases/latest/download/brido-android-release-${tag}.apk`;
+                    }
+                }
+            })
+            .catch(err => console.warn('Could not retrieve latest release assets directly from GitHub API:', err));
+    </script>
 
 </body>
 
