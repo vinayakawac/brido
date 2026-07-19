@@ -36,7 +36,7 @@
             <span class="sidebar-label">ON THIS PAGE</span>
             <nav class="sidebar-nav">
                 <a href="#install">Install</a>
-                <a href="#pair">Pair your phone</a>
+                <a href="#pair">Pair your phone (optional)</a>
                 <a href="#analyse">Analyse a screen</a>
                 <a href="#providers">Configure AI providers</a>
                 <a href="#stealth">Stealth mode</a>
@@ -53,10 +53,7 @@
             <!-- Section 1: Install -->
             <section id="install">
                 <h2>Install</h2>
-                <p>Brido is a two-part utility consisting of a lightweight Windows desktop server written in Rust and an
-                    Android companion app written in Kotlin. The system contains no account registration or baked-in API
-                    keys &mdash; it operates completely within your local network, using AI models powered by your own
-                    API configurations.</p>
+                <p>Brido is a lightweight Windows desktop application written in Rust. It can be run completely standalone (utilizing local hotkeys and a stealth overlay window directly on Windows) or paired with an optional Android companion app written in Kotlin for dual-screen streaming. The system contains no account registration or baked-in API keys &mdash; it operates completely within your local network, using AI models powered by your own API configurations.</p>
                 <p>To run the server from source, clone the repository and execute the following commands in PowerShell:
                 </p>
                 <div class="terminal-block">
@@ -81,11 +78,9 @@ brido-server-v1.0.1.exe</div>
 
             <!-- Section 2: Pair -->
             <section id="pair">
-                <h2>Pair your phone</h2>
-                <p>To view your stream and perform analysis, install the Android APK on a physical phone connected to
-                    the exact same Wi-Fi network as your laptop. Launch the app and point your phone's camera at the QR
-                    code displayed on the server GUI. Pairing completes in seconds, exchanging a self-signed TLS
-                    handshake and saving a session token.</p>
+                <h2>Pair your phone (optional)</h2>
+                <p>If you choose to stream your screen to an external device, install the Android APK on a physical phone connected to the exact same Wi-Fi network as your laptop. Launch the app and point your phone's camera at the QR code displayed on the server GUI. Pairing completes in seconds, exchanging a self-signed TLS handshake and saving a session token.</p>
+                <p>If you prefer running Brido completely standalone on Windows, you can skip this step entirely and use the global hotkey overlay mode.</p>
                 <p>If the camera fails to scan or you want to connect manually, enter the server's IP address and the
                     active 6-digit PIN shown on the server window. The connection URI uses the following schema:</p>
                 <div class="terminal-block">
@@ -101,14 +96,11 @@ brido://&lt;your-local-ip&gt;:&lt;port&gt;:&lt;6-digit-pin&gt;</div>
             <!-- Section 3: Analyse -->
             <section id="analyse">
                 <h2>Analyse a screen</h2>
-                <p>Once paired, the Windows server uses DXGI to capture desktop frames, encode them as JPEG, and push
-                    them at 15 fps over a secure WebSocket (WSS) link. The phone acts as a companion display. Tap the
-                    <strong>anAlyse</strong> button inside the app to capture the active frame. The phone resizes and
-                    encodes the frame, sending it to the server API for evaluation.</p>
-                <p>You can also capture and analyze without touching your phone. The server registers global Windows
-                    hotkeys. Pressing the capture hotkey (default <code>Ctrl+Shift+Space</code>) captures the active
-                    screen section and triggers immediate analysis directly on your computer, displaying results in an
-                    on-screen overlay.</p>
+                <p>Brido supports two analysis workflows depending on your configuration:</p>
+                <ul class="bullet-list">
+                    <li><strong>Standalone Windows Overlay (Hotkey Mode)</strong> &mdash; The Windows application registers global hotkeys. Pressing the capture hotkey (default <code>Ctrl+Shift+Space</code>) captures the active screen area under focus and triggers immediate analysis directly on your PC, displaying results in a stealthy, non-activating overlay window without requiring an external device.</li>
+                    <li><strong>Companion Phone Streaming</strong> &mdash; Once paired, the Windows server uses DXGI to capture desktop frames, encode them as JPEG, and push them at 15 fps over a secure WebSocket (WSS) link. Tap the <strong>anAlyse</strong> button inside the Android companion app to capture the active frame. The phone resizes the frame and POSTs it to the local server API for evaluation.</li>
+                </ul>
                 <p>The Android client triggers analysis by firing a REST request to the server endpoint:</p>
                 <div class="terminal-block">
                     <div class="terminal-header">
