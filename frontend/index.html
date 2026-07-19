@@ -36,12 +36,9 @@
                 <div class="hero-inner-grid">
                     <div class="hero-text-side">
                         <div class="badge">Open Source &middot; Free &middot; Apache 2.0</div>
-                        <h1>Your screen,<br>analyzed by <em>AI</em>,<br>on your phone.</h1>
+                        <h1>Your screen,<br>analyzed by <em>AI</em>,<br>on your phone or PC.</h1>
                         <p class="hero-desc">
-                            Stream your Windows screen to your Android phone over local Wi-Fi.
-                            Tap once for instant AI analysis of any problem on screen —
-                            coding questions, MCQs, debugging sessions.
-                            Invisible to proctoring tools. No tab-switch detection. No cloud relay.
+                            Analyze any problem on your screen instantly. Stream to your phone over local Wi-Fi or run directly on Windows with a stealth overlay. Tap or press hotkey to get instant AI analysis of coding questions, MCQs, or debugging sessions. Invisible to proctoring tools, with no tab-switch detection and no cloud relay.
                         </p>
                         <div class="cta-group">
                             <div class="cta-item">
@@ -71,9 +68,10 @@
                     <div class="hero-slider-side">
                         <div class="slider-wrapper">
                             <div class="slider-track">
-                                <div class="slide"><img src="main.png" alt="Brido main window dashboard"></div>
-                                <div class="slide"><img src="api_keys.png" alt="Configure API keys dialog"></div>
-                                <div class="slide"><img src="hot_key_custom.png" alt="Hotkey customization screen"></div>
+                                <div class="slide"><img src="images/main.png" alt="Brido main window dashboard"></div>
+                                <div class="slide"><img src="images/api_keys.png" alt="Configure API keys dialog"></div>
+                                <div class="slide"><img src="images/hot_key_custom.png" alt="Hotkey customization screen"></div>
+                                <div class="slide"><img src="images/phone_connection.png" alt="Phone connection screen"></div>
                             </div>
                         </div>
                     </div>
@@ -96,27 +94,23 @@ cd brido/brido_server &amp;&amp; cargo run --release</div>
                 <div class="section-header">
                     <span class="section-label">Applications</span>
                     <h2>Built for focused<br>problem solving</h2>
-                    <p>AI assistance one tap away — without breaking your session or your focus.</p>
+                    <p>AI assistance one tap or hotkey away — without breaking your session or your focus.</p>
                 </div>
                 <div class="use-cases-grid">
                     <div class="use-case-card">
                         <span class="uc-num">USE CASE 01</span>
                         <h3>Online Coding Tests</h3>
-                        <p>Stream the test tab to your phone. Tap <strong>Analyse</strong> to get AI hints, approach
-                            suggestions, and edge-case breakdowns — without touching the browser or switching tabs.</p>
+                        <p>Stream the test to your phone or trigger the desktop overlay via hotkey. Get AI hints, approach suggestions, and edge-case breakdowns without touching the browser or switching tabs.</p>
                     </div>
                     <div class="use-case-card">
                         <span class="uc-num">USE CASE 02</span>
                         <h3>Technical Interviews</h3>
-                        <p>Keep the interview window in focus. The Brido overlay is excluded from screen share and
-                            Alt-Tab — your interviewer never sees it while you get real-time AI guidance on your phone.
-                        </p>
+                        <p>Keep the interview window in focus. The stealthy Windows overlay is excluded from screen share and Alt-Tab, providing real-time AI guidance directly on your PC screen or on your phone.</p>
                     </div>
                     <div class="use-case-card">
                         <span class="uc-num">USE CASE 03</span>
                         <h3>Exam &amp; MCQ Practice</h3>
-                        <p>Run Brido alongside practice platforms. Stream MCQs, logic puzzles, or diagrams and use AI
-                            analysis to understand the underlying concept, not just the answer.</p>
+                        <p>Run Brido alongside practice platforms. Use the Windows-only overlay or stream to your phone to analyze MCQs, logic puzzles, or complex diagrams in real time.</p>
                     </div>
                 </div>
             </div>
@@ -126,30 +120,25 @@ cd brido/brido_server &amp;&amp; cargo run --release</div>
         <section class="how-it-works">
             <div class="container">
                 <div class="section-header">
-                    <span class="section-label">Setup</span>
-                    <h2>Three steps to AI<br>analysis on your phone</h2>
-                    <p>From install to live stream in under two minutes.</p>
+                    <span class="section-label">Setup &amp; Usage</span>
+                    <h2>Two ways to run AI analysis</h2>
+                    <p>From setup to instant solutions in under two minutes.</p>
                 </div>
                 <div class="steps-grid">
                     <div class="step-card">
-                        <span class="step-num">STEP 01</span>
-                        <h3>Launch the Server</h3>
-                        <p>Run the Rust server on your Windows laptop. The egui window shows your QR code, local IP, and
-                            a randomly generated 6-digit PIN. Minimise to tray — it keeps running silently in the
-                            background.</p>
+                        <span class="step-num">OPTION A</span>
+                        <h3>Windows-Only Stealth Mode</h3>
+                        <p>Launch the Rust app. Press <code>Ctrl+Shift+Space</code> anywhere. An invisible stealth overlay captures the active screen area, runs AI analysis, and renders the result directly on your PC screen.</p>
                     </div>
                     <div class="step-card">
-                        <span class="step-num">STEP 02</span>
-                        <h3>Pair Your Phone</h3>
-                        <p>Open the Android app and scan the QR code — or type the IP and PIN manually. A secure WSS
-                            connection starts immediately. Your laptop screen appears live on your phone.</p>
+                        <span class="step-num">OPTION B</span>
+                        <h3>Companion Phone Streaming</h3>
+                        <p>Launch the Rust app and open the Android companion app. Scan the QR code to stream your Windows screen. Tap <strong>Analyse</strong> on your phone for full separation of concerns.</p>
                     </div>
                     <div class="step-card">
                         <span class="step-num">STEP 03</span>
-                        <h3>Tap anAlyse</h3>
-                        <p>The current screen frame is sent to the server, processed by your configured AI provider
-                            (Gemini, OpenRouter, Ollama, or others), and the response appears in the terminal panel
-                            instantly.</p>
+                        <h3>Configure Providers</h3>
+                        <p>Input API keys for Gemini, OpenRouter, OpenAI, Anthropic, or run a local Ollama model. The system routes requests locally with no cloud relay or account required.</p>
                     </div>
                 </div>
             </div>
@@ -160,18 +149,18 @@ cd brido/brido_server &amp;&amp; cargo run --release</div>
             <div class="container">
                 <div class="section-header">
                     <span class="section-label">Architecture</span>
-                    <h2>Two components,<br>one local network</h2>
+                    <h2>Flexible components,<br>local network</h2>
                     <p>No cloud relay. No account. No subscription. Configure AI providers via the GUI or
                         <code>.env.local</code>.</p>
                 </div>
                 <div class="platform-cols">
 
-                    <!-- Windows Server -->
+                    <!-- Windows App / Server -->
                     <div class="platform-col">
                         <div class="platform-col-header">
                             <i data-lucide="monitor"></i>
                             <div>
-                                <h3>Windows Server</h3>
+                                <h3>Windows App / Server</h3>
                                 <div class="stack-tag">Rust · axum · egui · HTTPS / WSS</div>
                             </div>
                         </div>
