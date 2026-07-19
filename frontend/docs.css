@@ -299,20 +299,66 @@ details[open] summary::after {
   }
 
   .sidebar {
-    position: static;
+    position: sticky;
+    top: 3.5rem;
+    z-index: 90;
     height: auto;
+    background: rgba(18, 18, 18, 0.95);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
     border-right: none;
     border-bottom: 1px solid var(--border);
-    padding: 2rem 0;
+    padding: 0.875rem 1.5rem;
+    margin-left: -1.5rem;
+    margin-right: -1.5rem;
+  }
+
+  .sidebar-label {
+    display: none;
   }
 
   .sidebar-nav {
     flex-direction: row;
-    flex-wrap: wrap;
-    gap: 1rem;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    gap: 1.25rem;
+    padding-bottom: 0.25rem;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none; /* Firefox */
+  }
+
+  .sidebar-nav::-webkit-scrollbar {
+    display: none; /* Chrome, Safari, Opera */
+  }
+
+  .sidebar-nav a {
+    flex-shrink: 0;
+    padding: 0.35rem 0;
+    border-bottom: 2px solid transparent;
+  }
+
+  .sidebar-nav a.active {
+    border-bottom: 2px solid var(--accent);
   }
 
   .docs-content {
-    padding: 3rem 0;
+    padding: 2.5rem 0;
+  }
+
+  .docs-content section {
+    scroll-margin-top: 8rem;
+    margin-bottom: 4rem;
+  }
+
+  table {
+    display: block;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    width: 100%;
+  }
+
+  th, td {
+    padding: 0.625rem 0.75rem;
   }
 }
+
