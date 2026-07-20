@@ -1,4 +1,0 @@
-User-agent: *
-Allow: /
-
-Sitemap: https://brido.o-hub.dev/sitemap.xml
