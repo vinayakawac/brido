@@ -2,7 +2,6 @@ package com.example.brido.stream
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
-import com.example.brido.network.RetrofitClient
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
@@ -11,17 +10,19 @@ import okhttp3.WebSocketListener
 import okio.ByteString
 import java.util.concurrent.TimeUnit
 
+/**
+ * @param httpClient the pinned client built during connect, so the stream is
+ *   held to the same certificate as the REST calls.
+ */
 class StreamManager(
+    httpClient: OkHttpClient,
     private val onFrame: (Bitmap) -> Unit,
     private val onConnected: () -> Unit,
     private val onDisconnected: (reason: String) -> Unit,
 ) {
-    private val client = OkHttpClient.Builder()
-        .sslSocketFactory(
-            RetrofitClient.okHttpClient.sslSocketFactory,
-            RetrofitClient.trustManager
-        )
-        .hostnameVerifier { _, _ -> true }
+    // Reuses the pinned TLS configuration; only the timeouts differ, because a
+    // stream should never time out on read the way a request does.
+    private val client = httpClient.newBuilder()
         .connectTimeout(5, TimeUnit.SECONDS)
         .readTimeout(0, TimeUnit.MILLISECONDS)
         .pingInterval(10, TimeUnit.SECONDS)

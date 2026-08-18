@@ -6,6 +6,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.example.brido.screens.ConnectionScreen
+import com.example.brido.screens.SettingsScreen
 import com.example.brido.screens.StreamScreen
 import com.example.brido.screens.WelcomeScreen
 import com.example.brido.viewmodel.BridoViewModel
@@ -14,6 +15,7 @@ object Routes {
     const val WELCOME = "welcome"
     const val CONNECTION = "connection"
     const val STREAM = "stream"
+    const val SETTINGS = "settings"
 }
 
 @Composable
@@ -28,7 +30,12 @@ fun BridoNavigation() {
         composable(Routes.WELCOME) {
             WelcomeScreen(
                 onContinue = {
-                    navController.navigate(Routes.CONNECTION)
+                    // Drop the splash from the back stack: it auto-advances
+                    // after 2.5s, so leaving it there bounces the user straight
+                    // back to Connection when they press Back.
+                    navController.navigate(Routes.CONNECTION) {
+                        popUpTo(Routes.WELCOME) { inclusive = true }
+                    }
                 },
             )
         }
@@ -40,7 +47,11 @@ fun BridoNavigation() {
                     navController.popBackStack()
                 },
                 onConnected = {
-                    navController.navigate(Routes.STREAM)
+                    // Replace Connection rather than stacking on top of it, so
+                    // repeated connects cannot pile up entries.
+                    navController.navigate(Routes.STREAM) {
+                        popUpTo(Routes.CONNECTION) { inclusive = true }
+                    }
                 },
             )
         }
@@ -49,7 +60,14 @@ fun BridoNavigation() {
             StreamScreen(
                 viewModel = viewModel,
                 onGoBack = {
-                    navController.popBackStack()
+                    // Connection is no longer on the stack, so navigate to it
+                    // explicitly instead of popping into an empty stack.
+                    navController.navigate(Routes.CONNECTION) {
+                        popUpTo(Routes.STREAM) { inclusive = true }
+                    }
+                },
+                onOpenSettings = {
+                    navController.navigate(Routes.SETTINGS)
                 },
                 onDisconnect = {
                     viewModel.disconnect()
@@ -57,6 +75,13 @@ fun BridoNavigation() {
                         popUpTo(Routes.STREAM) { inclusive = true }
                     }
                 },
+            )
+        }
+
+        composable(Routes.SETTINGS) {
+            SettingsScreen(
+                viewModel = viewModel,
+                onGoBack = { navController.popBackStack() },
             )
         }
     }

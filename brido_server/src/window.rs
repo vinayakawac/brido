@@ -102,6 +102,17 @@ pub struct OverlayApp {
     connected_count: std::sync::Arc<std::sync::atomic::AtomicUsize>,
     show_qr: bool,
     qr_texture: Option<egui::TextureHandle>,
+    /// SHA-256 of the server's TLS certificate, published once the server is up.
+    cert_fingerprint: std::sync::Arc<std::sync::RwLock<Option<String>>>,
+    /// Config shared with the HTTP server, so both paths use the same keys.
+    shared_config: std::sync::Arc<std::sync::RwLock<brido_server::config::Config>>,
+    /// Incremented by the server when a paired device edits settings.
+    settings_version: std::sync::Arc<std::sync::atomic::AtomicU64>,
+    /// Last version this window has applied, to detect remote edits.
+    applied_settings_version: u64,
+    /// Payload the current QR texture was built from, so it is regenerated
+    /// when the fingerprint arrives rather than being cached forever.
+    qr_payload: String,
     voice_mode: bool,
     voice_copilot_task: Option<tokio::task::JoinHandle<()>>,
     audio_stop_tx: Option<std::sync::mpsc::Sender<()>>,
@@ -120,6 +131,9 @@ impl OverlayApp {
         port: u16,
         server_ready: std::sync::Arc<std::sync::atomic::AtomicBool>,
         connected_count: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+        cert_fingerprint: std::sync::Arc<std::sync::RwLock<Option<String>>>,
+        shared_config: std::sync::Arc<std::sync::RwLock<brido_server::config::Config>>,
+        settings_version: std::sync::Arc<std::sync::atomic::AtomicU64>,
     ) -> Self {
         let (result_tx, result_rx) = mpsc::channel();
         Self {
@@ -179,6 +193,11 @@ impl OverlayApp {
             connected_count,
             show_qr: false,
             qr_texture: None,
+            cert_fingerprint,
+            shared_config,
+            settings_version,
+            applied_settings_version: 0,
+            qr_payload: String::new(),
             voice_mode: false,
             voice_copilot_task: None,
             audio_stop_tx: None,
@@ -325,6 +344,7 @@ impl OverlayApp {
                     ) {
                         tracing::error!("Failed to save stealth mode toggle: {}", e);
                     }
+                    self.publish_config();
                     ctx.request_repaint();
                 }
 
@@ -436,6 +456,61 @@ impl OverlayApp {
                 }
             }
         }
+    }
+
+    /// Publishes this window's config to the HTTP server.
+    ///
+    /// Without this the server keeps serving requests with whatever keys
+    /// existed at launch, which is why phone analysis failed with stale
+    /// credentials while the desktop's own capture worked.
+    fn publish_config(&mut self) {
+        if let Ok(mut shared) = self.shared_config.write() {
+            *shared = self.config.clone();
+        }
+        // Count our own write so we don't immediately treat it as a remote edit.
+        self.applied_settings_version = self
+            .settings_version
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+            + 1;
+    }
+
+    /// Pulls in settings changed by a paired device.
+    fn sync_remote_settings(&mut self) {
+        let current = self.settings_version.load(std::sync::atomic::Ordering::SeqCst);
+        if current == self.applied_settings_version {
+            return;
+        }
+        self.applied_settings_version = current;
+
+        let Ok(shared) = self.shared_config.read() else {
+            return;
+        };
+        self.config = shared.clone();
+        drop(shared);
+
+        // Refresh the settings form so the desktop shows what the phone sent.
+        self.settings_gemini_key = self.config.gemini_api_key.clone();
+        self.settings_openrouter_key = self.config.openrouter_api_key.clone();
+        self.settings_ollama_key = self.config.ollama_api_key.clone();
+        self.settings_ollama_base_url = self.config.ollama_base_url.clone();
+        self.settings_deepgram_key = self.config.deepgram_api_key.clone();
+        self.settings_resume = self.config.resume_text.clone();
+        self.settings_jd = self.config.job_description_text.clone();
+        self.settings_active_provider = self.config.active_provider.clone();
+        self.settings_asr_model = self.config.asr_model.clone();
+        self.settings_models.insert(
+            brido_server::config::ProviderKind::Gemini,
+            self.config.gemini_model.clone(),
+        );
+        self.settings_models.insert(
+            brido_server::config::ProviderKind::OpenRouter,
+            self.config.openrouter_model.clone(),
+        );
+        self.settings_models.insert(
+            brido_server::config::ProviderKind::Ollama,
+            self.config.ollama_model.clone(),
+        );
+        self.status_text = "Settings synced from phone".to_string();
     }
 
     /// Apply stealth + initial positioning on the first frame.
@@ -741,6 +816,10 @@ impl OverlayApp {
                                 );
                                 self.hotkey_handle = Some(new_handle);
                                 
+                                // Push the new keys to the HTTP server so the
+                                // phone uses them on its very next request.
+                                self.publish_config();
+
                                 self.show_settings = false;
                                 self.error_text = None;
                                 self.status_text = "Settings saved & applied".to_string();
@@ -813,22 +892,67 @@ impl OverlayApp {
                     return;
                 }
                 
-                let payload = format!("brido://{}:{}:{}", self.ip, self.port, self.pin);
-                
-                if self.qr_texture.is_none() {
-                    self.qr_texture = Some(crate::ui::qr_panel::generate_qr_texture(ctx, &payload, None));
+                // The fingerprint lets the phone pin this exact certificate.
+                // Older payloads had three fields; the app still accepts those.
+                let fingerprint = self
+                    .cert_fingerprint
+                    .read()
+                    .ok()
+                    .and_then(|f| f.clone())
+                    .unwrap_or_default();
+
+                let payload = if fingerprint.is_empty() {
+                    format!("brido://{}:{}:{}", self.ip, self.port, self.pin)
+                } else {
+                    format!(
+                        "brido://{}:{}:{}:{}",
+                        self.ip, self.port, self.pin, fingerprint
+                    )
+                };
+
+                // Regenerate whenever the payload changes (the fingerprint
+                // usually lands a moment after the panel first opens).
+                if self.qr_texture.is_none() || self.qr_payload != payload {
+                    let prev = self.qr_texture.take();
+                    self.qr_texture =
+                        Some(crate::ui::qr_panel::generate_qr_texture(ctx, &payload, prev));
+                    self.qr_payload = payload.clone();
                 }
-                
+
                 if let Some(tex) = &self.qr_texture {
                     ui.vertical_centered(|ui| {
                         ui.add(egui::Image::new(tex).fit_to_exact_size(Vec2::new(160.0, 160.0)));
                     });
                 }
-                
+
                 ui.add_space(8.0);
                 ui.label(RichText::new(format!("IP: {}", self.ip)).color(TEXT_PRIMARY));
                 ui.label(RichText::new(format!("Port: {}", self.port)).color(TEXT_PRIMARY));
                 ui.label(RichText::new(format!("PIN: {}", self.pin)).color(ACCENT));
+
+                if fingerprint.is_empty() {
+                    ui.label(
+                        RichText::new("Certificate pending…")
+                            .color(YELLOW)
+                            .size(11.0),
+                    );
+                } else {
+                    // Short prefix is enough for a human to eyeball a match.
+                    ui.label(
+                        RichText::new(format!("Cert: {}…", &fingerprint[..16]))
+                            .color(TEXT_DIM)
+                            .size(11.0),
+                    );
+                }
+
+                // Manual entry can't carry the fingerprint, so make copying easy.
+                ui.add_space(6.0);
+                if ui.button("Copy IP + PIN").clicked() {
+                    if let Ok(mut clip) = arboard::Clipboard::new() {
+                        let _ = clip.set_text(format!("{}:{} PIN {}", self.ip, self.port, self.pin));
+                        self.status_text = "Copied to clipboard".to_string();
+                    }
+                }
                 
                 ui.add_space(8.0);
                 let conns = self.connected_count.load(std::sync::atomic::Ordering::Relaxed);
@@ -844,6 +968,7 @@ impl OverlayApp {
 impl eframe::App for OverlayApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.apply_first_frame_setup(ctx);
+        self.sync_remote_settings();
         self.poll_hotkeys(ctx);
         self.poll_results();
 

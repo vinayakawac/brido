@@ -4,32 +4,41 @@ import okhttp3.OkHttpClient
 import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
-import java.security.SecureRandom
-import java.security.cert.X509Certificate
 import java.util.concurrent.TimeUnit
-import javax.net.ssl.SSLContext
-import javax.net.ssl.TrustManager
 import javax.net.ssl.X509TrustManager
 
+/**
+ * Builds HTTP clients that trust exactly one certificate — the one belonging to
+ * the paired Brido server. See [ServerTrust] for how the pin is established.
+ */
 object RetrofitClient {
 
-    private var retrofit: Retrofit? = null
-    private var currentBaseUrl: String? = null
+    /** A client plus the Retrofit service sharing its pinned TLS settings. */
+    class Session(
+        val service: BridoApiService,
+        val client: OkHttpClient,
+    )
 
-    /** TrustManager that accepts the server's self-signed certificate. */
-    val trustManager = object : X509TrustManager {
-        override fun checkClientTrusted(chain: Array<out X509Certificate>?, authType: String?) {}
-        override fun checkServerTrusted(chain: Array<out X509Certificate>?, authType: String?) {}
-        override fun getAcceptedIssuers(): Array<X509Certificate> = arrayOf()
-    }
+    /**
+     * @param expectedFingerprint pinned SHA-256 from the QR code or a previous
+     *   connection; null means trust-on-first-use.
+     * @param onPinned receives the fingerprint that was accepted, for storage.
+     */
+    fun createSession(
+        serverIp: String,
+        port: Int,
+        expectedFingerprint: String?,
+        onPinned: (String) -> Unit,
+    ): Session {
+        val trustManager: X509TrustManager =
+            ServerTrust.PinnedTrustManager(expectedFingerprint, onPinned)
 
-    private val sslContext: SSLContext = SSLContext.getInstance("TLS").apply {
-        init(null, arrayOf<TrustManager>(trustManager), SecureRandom())
-    }
-
-    val okHttpClient: OkHttpClient by lazy {
-        OkHttpClient.Builder()
-            .sslSocketFactory(sslContext.socketFactory, trustManager)
+        val client = OkHttpClient.Builder()
+            .sslSocketFactory(ServerTrust.socketFactory(trustManager), trustManager)
+            // The certificate is pinned by fingerprint, which is a stronger
+            // check than matching a hostname on a self-signed cert whose SANs
+            // we already control. Only the paired server can complete the
+            // handshake, so hostname matching adds nothing here.
             .hostnameVerifier { _, _ -> true }
             .connectTimeout(10, TimeUnit.SECONDS)
             .readTimeout(60, TimeUnit.SECONDS)
@@ -40,18 +49,13 @@ object RetrofitClient {
                 }
             )
             .build()
-    }
 
-    fun getService(serverIp: String, port: Int = 8080): BridoApiService {
-        val baseUrl = "https://$serverIp:$port/"
-        if (retrofit == null || currentBaseUrl != baseUrl) {
-            currentBaseUrl = baseUrl
-            retrofit = Retrofit.Builder()
-                .baseUrl(baseUrl)
-                .client(okHttpClient)
-                .addConverterFactory(GsonConverterFactory.create())
-                .build()
-        }
-        return retrofit!!.create(BridoApiService::class.java)
+        val retrofit = Retrofit.Builder()
+            .baseUrl("https://$serverIp:$port/")
+            .client(client)
+            .addConverterFactory(GsonConverterFactory.create())
+            .build()
+
+        return Session(retrofit.create(BridoApiService::class.java), client)
     }
 }

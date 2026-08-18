@@ -35,6 +35,7 @@ import androidx.compose.material3.TabRow
 import androidx.compose.material3.TabRowDefaults.SecondaryIndicator
 import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -49,6 +50,11 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -143,9 +149,9 @@ fun ConnectionScreen(
 
         when (selectedTab) {
             0 -> QrScannerTab { data ->
-                viewModel.serverIp = data.ip
-                viewModel.serverPort = data.port
-                viewModel.pin = data.pin
+                // The QR may also carry the server's certificate fingerprint,
+                // which pins the connection before the first request.
+                viewModel.applyScannedData(data.ip, data.port, data.pin, data.fingerprint)
                 viewModel.connect(onConnected)
             }
             1 -> ManualEntryTab(viewModel, onConnected)
@@ -158,6 +164,12 @@ private fun ManualEntryTab(
     viewModel: BridoViewModel,
     onConnected: () -> Unit,
 ) {
+    val focusManager = LocalFocusManager.current
+    val canConnect = !viewModel.isConnecting &&
+        viewModel.serverIp.isNotBlank() &&
+        viewModel.pin.isNotBlank() &&
+        viewModel.serverPort in 1..65535
+
     val fieldColors = OutlinedTextFieldDefaults.colors(
         focusedTextColor = BridoTextPrimary,
         unfocusedTextColor = BridoTextPrimary,
@@ -178,34 +190,96 @@ private fun ManualEntryTab(
 
         Spacer(Modifier.height(16.dp))
 
-        // Server IP
-        Text("Server IP Address", color = BridoTextSecondary, fontSize = 12.sp)
-        Spacer(Modifier.height(4.dp))
-        OutlinedTextField(
-            value = viewModel.serverIp,
-            onValueChange = { viewModel.serverIp = it },
-            placeholder = { Text("192.168.0.6", color = BridoTextSecondary.copy(alpha = 0.5f)) },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth(),
-            colors = fieldColors,
-        )
+        // Server IP + port. The port is editable because the server's port is
+        // configurable — without this field a non-default port can only be
+        // paired by QR, and manual entry fails with a confusing timeout.
+        Row(modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.weight(2f)) {
+                Text("Server IP Address", color = BridoTextSecondary, fontSize = 12.sp)
+                Spacer(Modifier.height(4.dp))
+                OutlinedTextField(
+                    value = viewModel.serverIp,
+                    onValueChange = { viewModel.serverIp = it.trim() },
+                    placeholder = {
+                        Text("192.168.0.6", color = BridoTextSecondary.copy(alpha = 0.5f))
+                    },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(
+                        keyboardType = KeyboardType.Uri,
+                        imeAction = ImeAction.Next,
+                    ),
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = fieldColors,
+                )
+            }
+
+            Spacer(Modifier.width(12.dp))
+
+            Column(modifier = Modifier.weight(1f)) {
+                Text("Port", color = BridoTextSecondary, fontSize = 12.sp)
+                Spacer(Modifier.height(4.dp))
+                OutlinedTextField(
+                    value = viewModel.serverPort.toString(),
+                    onValueChange = { entered ->
+                        entered.filter { it.isDigit() }.take(5).toIntOrNull()
+                            ?.let { viewModel.serverPort = it }
+                            ?: run { if (entered.isEmpty()) viewModel.serverPort = 0 }
+                    },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(
+                        keyboardType = KeyboardType.Number,
+                        imeAction = ImeAction.Next,
+                    ),
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = fieldColors,
+                )
+            }
+        }
 
         Spacer(Modifier.height(16.dp))
 
-        // PIN Code
+        // PIN Code — numeric keypad, since the PIN is always six digits.
         Text("PIN Code", color = BridoTextSecondary, fontSize = 12.sp)
         Spacer(Modifier.height(4.dp))
         OutlinedTextField(
             value = viewModel.pin,
-            onValueChange = { viewModel.pin = it },
+            onValueChange = { entered -> viewModel.pin = entered.filter { it.isDigit() }.take(6) },
             placeholder = { Text("••••••", color = BridoTextSecondary.copy(alpha = 0.5f)) },
             singleLine = true,
             visualTransformation = PasswordVisualTransformation(),
+            keyboardOptions = KeyboardOptions(
+                keyboardType = KeyboardType.NumberPassword,
+                imeAction = ImeAction.Done,
+            ),
+            keyboardActions = KeyboardActions(
+                onDone = {
+                    focusManager.clearFocus()
+                    if (canConnect) viewModel.connect(onConnected)
+                },
+            ),
             modifier = Modifier.fillMaxWidth(),
             colors = fieldColors,
         )
 
         Spacer(Modifier.height(16.dp))
+
+        // Offer the saved session before asking for a PIN again.
+        if (viewModel.hasTrustedSession && !viewModel.isConnected) {
+            Button(
+                onClick = { viewModel.connectWithTrustedToken(onConnected) },
+                enabled = !viewModel.isConnecting,
+                modifier = Modifier.fillMaxWidth().height(50.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = BridoAccent),
+                shape = RoundedCornerShape(8.dp),
+            ) {
+                Text("Reconnect without PIN", color = Color.White, fontWeight = FontWeight.Bold)
+            }
+            Spacer(Modifier.height(8.dp))
+            TextButton(onClick = { viewModel.forgetThisDevice() }) {
+                Text("Forget this device", color = BridoTextSecondary, fontSize = 13.sp)
+            }
+            Spacer(Modifier.height(8.dp))
+        }
 
         // Trust device checkbox
         Row(
@@ -215,7 +289,7 @@ private fun ManualEntryTab(
             Column(modifier = Modifier.weight(1f)) {
                 Text("Trust this device", color = BridoTextPrimary, fontWeight = FontWeight.Medium)
                 Text(
-                    "Skip PIN entry on future connections",
+                    "Save a session so the PIN can be skipped next time",
                     color = BridoTextSecondary,
                     fontSize = 12.sp,
                 )
@@ -234,8 +308,11 @@ private fun ManualEntryTab(
 
         // Connect button
         Button(
-            onClick = { viewModel.connect(onConnected) },
-            enabled = !viewModel.isConnecting && viewModel.serverIp.isNotBlank() && viewModel.pin.isNotBlank(),
+            onClick = {
+                focusManager.clearFocus()
+                viewModel.connect(onConnected)
+            },
+            enabled = canConnect,
             modifier = Modifier.fillMaxWidth().height(50.dp),
             colors = ButtonDefaults.buttonColors(containerColor = BridoSurfaceVariant),
             shape = RoundedCornerShape(8.dp),

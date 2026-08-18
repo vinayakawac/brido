@@ -22,11 +22,9 @@ pub async fn ws_handler(
     Query(query): Query<StreamQuery>,
     State(state): State<Arc<AppState>>,
 ) -> Response {
-    let tokens = state.active_tokens.read().await;
-    if !tokens.contains(&query.token) {
+    if !state.auth.verify(&query.token).await {
         return StatusCode::UNAUTHORIZED.into_response();
     }
-    drop(tokens);
 
     ws.on_upgrade(move |socket| handle_stream(socket, state))
 }

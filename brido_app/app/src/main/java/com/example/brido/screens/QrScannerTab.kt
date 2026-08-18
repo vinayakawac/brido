@@ -58,16 +58,31 @@ import com.google.mlkit.vision.common.InputImage
 import java.util.concurrent.Executors
 
 /**
- * QR data format: brido://IP:PORT:PIN
+ * QR data format: `brido://IP:PORT:PIN[:CERT_SHA256]`
+ *
+ * The fingerprint is optional so codes produced by older servers still scan;
+ * when present it lets the app pin the certificate before the first request,
+ * which is the only way to rule out a man-in-the-middle on first contact.
  */
-data class QrConnectionData(val ip: String, val port: Int, val pin: String)
+data class QrConnectionData(
+    val ip: String,
+    val port: Int,
+    val pin: String,
+    val fingerprint: String? = null,
+)
 
 fun parseQrData(raw: String): QrConnectionData? {
-    val stripped = raw.removePrefix("brido://")
+    val stripped = raw.trim().removePrefix("brido://")
     val parts = stripped.split(":")
-    if (parts.size != 3) return null
-    val port = parts[1].toIntOrNull() ?: return null
-    return QrConnectionData(ip = parts[0], port = port, pin = parts[2])
+    if (parts.size !in 3..4) return null
+    val port = parts[1].toIntOrNull()?.takeIf { it in 1..65535 } ?: return null
+    if (parts[0].isBlank() || parts[2].isBlank()) return null
+    return QrConnectionData(
+        ip = parts[0],
+        port = port,
+        pin = parts[2],
+        fingerprint = parts.getOrNull(3)?.takeIf { it.isNotBlank() },
+    )
 }
 
 @Composable

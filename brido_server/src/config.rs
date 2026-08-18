@@ -95,6 +95,18 @@ impl Config {
             || !self.openrouter_api_key.trim().is_empty()
             || !self.ollama_api_key.trim().is_empty()
     }
+
+    /// Model belonging to the currently selected provider.
+    ///
+    /// Clients that do not name a model get this one, so the desktop's
+    /// provider/model choice is the single source of truth.
+    pub fn active_model(&self) -> &str {
+        match ProviderKind::from_label(&self.active_provider) {
+            Some(ProviderKind::OpenRouter) => &self.openrouter_model,
+            Some(ProviderKind::Ollama) => &self.ollama_model,
+            _ => &self.gemini_model,
+        }
+    }
 }
 
 impl Default for Config {
