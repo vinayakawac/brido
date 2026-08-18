@@ -17,12 +17,25 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.foundation.layout.WindowInsets
@@ -45,6 +58,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.ui.unit.sp
 import com.example.brido.ui.theme.BridoAccent
@@ -56,33 +70,75 @@ import com.example.brido.ui.theme.BridoTextSecondary
 import com.example.brido.viewmodel.BridoViewModel
 
 @Composable
-fun StreamScreen(viewModel: BridoViewModel, onGoBack: () -> Unit = {}, onDisconnect: () -> Unit = {}) {
+fun StreamScreen(
+    viewModel: BridoViewModel,
+    onGoBack: () -> Unit = {},
+    onOpenSettings: () -> Unit = {},
+    onDisconnect: () -> Unit = {},
+) {
+    var question by rememberSaveable { mutableStateOf("") }
+    val focusManager = LocalFocusManager.current
+
+    // Holds the screen awake while streaming — otherwise the display sleeps
+    // mid-session and the stream is interrupted.
+    val view = LocalView.current
+    DisposableEffect(viewModel.isStreaming) {
+        view.keepScreenOn = viewModel.isStreaming
+        onDispose { view.keepScreenOn = false }
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
             .background(BridoDark)
             .windowInsetsPadding(WindowInsets.systemBars),
     ) {
-        // ── Back Bar ─────────────────────────────────────────────────────
+        // ── Top Bar ──────────────────────────────────────────────────────
         Row(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier
                 .fillMaxWidth()
-                .clickable { onGoBack() }
                 .padding(horizontal = 12.dp, vertical = 10.dp),
         ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.clickable { onGoBack() },
+            ) {
+                Icon(
+                    Icons.AutoMirrored.Filled.ArrowBack,
+                    contentDescription = "go back",
+                    tint = BridoTextSecondary,
+                    modifier = Modifier.size(18.dp),
+                )
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    "go baCk",
+                    color = BridoTextSecondary,
+                    fontSize = 14.sp,
+                    fontFamily = FontFamily.Serif,
+                )
+            }
+
+            Spacer(Modifier.weight(1f))
+
+            // Shows which model will actually run, synced from the desktop.
+            viewModel.serverDefaultModel?.let { model ->
+                Text(
+                    model,
+                    color = BridoAccent,
+                    fontSize = 11.sp,
+                    fontFamily = FontFamily.Monospace,
+                )
+                Spacer(Modifier.width(10.dp))
+            }
+
             Icon(
-                Icons.AutoMirrored.Filled.ArrowBack,
-                contentDescription = "go back",
+                Icons.Default.Settings,
+                contentDescription = "Settings",
                 tint = BridoTextSecondary,
-                modifier = Modifier.size(18.dp),
-            )
-            Spacer(Modifier.width(6.dp))
-            Text(
-                "go baCk",
-                color = BridoTextSecondary,
-                fontSize = 14.sp,
-                fontFamily = FontFamily.Serif,
+                modifier = Modifier
+                    .size(22.dp)
+                    .clickable { onOpenSettings() },
             )
         }
         // ── Video Stream Viewer ──────────────────────────────────────────
@@ -103,9 +159,72 @@ fun StreamScreen(viewModel: BridoViewModel, onGoBack: () -> Unit = {}, onDisconn
                 .padding(horizontal = 8.dp, vertical = 4.dp),
         )
 
+        // ── Retry (only after reconnect attempts are exhausted) ──────────
+        if (viewModel.canRetryStream) {
+            Button(
+                onClick = { viewModel.retryStream() },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp)
+                    .padding(top = 8.dp)
+                    .height(44.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = BridoAccent),
+                shape = RoundedCornerShape(8.dp),
+            ) {
+                Text("Retry stream", color = Color.White, fontWeight = FontWeight.Bold)
+            }
+        }
+
+        // ── Question input ───────────────────────────────────────────────
+        // Matches the desktop overlay, which can ask free-text questions about
+        // the captured frame. Leaving it blank uses the server's default prompt.
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp)
+                .padding(top = 8.dp),
+        ) {
+            OutlinedTextField(
+                value = question,
+                onValueChange = { question = it },
+                placeholder = {
+                    Text(
+                        "Ask about this screen…",
+                        color = BridoTextSecondary.copy(alpha = 0.6f),
+                        fontSize = 13.sp,
+                    )
+                },
+                singleLine = true,
+                enabled = !viewModel.isAnalysing,
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                keyboardActions = KeyboardActions(
+                    onSend = {
+                        focusManager.clearFocus()
+                        if (viewModel.isStreaming && !viewModel.isAnalysing) {
+                            viewModel.analyse(question)
+                            question = ""
+                        }
+                    },
+                ),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedTextColor = BridoTextPrimary,
+                    unfocusedTextColor = BridoTextPrimary,
+                    cursorColor = BridoAccent,
+                    focusedBorderColor = BridoAccent,
+                    unfocusedBorderColor = BridoSurfaceVariant,
+                ),
+                modifier = Modifier.weight(1f),
+            )
+        }
+
         // ── Analyse Button ───────────────────────────────────────────────
         Button(
-            onClick = { viewModel.analyse() },
+            onClick = {
+                focusManager.clearFocus()
+                viewModel.analyse(question)
+                question = ""
+            },
             enabled = !viewModel.isAnalysing && viewModel.isStreaming,
             modifier = Modifier
                 .fillMaxWidth()
@@ -225,6 +344,8 @@ private fun TerminalPanel(
                 }
             }
         } else {
+            // Wrapped so answers and code can actually be copied out of the app.
+            SelectionContainer {
             LazyColumn(
                 state = listState,
                 modifier = Modifier
@@ -267,6 +388,7 @@ private fun TerminalPanel(
                         )
                     }
                 }
+            }
             }
         }
     }

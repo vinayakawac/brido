@@ -1,27 +1,42 @@
 use axum::{
-    extract::State,
+    extract::{ConnectInfo, State},
     http::{HeaderMap, StatusCode},
     Json,
 };
 use serde::{Deserialize, Serialize};
+use std::net::SocketAddr;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use uuid::Uuid;
 
-use brido_server::model_manager::{AnalyseError, AnalyseErrorCode, ModelManager, ProviderAttempt};
+use crate::auth::{PinOutcome, TokenKind};
 use crate::server::AppState;
+use brido_server::model_manager::{AnalyseError, AnalyseErrorCode, ModelManager, ProviderAttempt};
 
 // ── Request / Response types ────────────────────────────────────────────────
 
 #[derive(Deserialize)]
 pub struct ConnectRequest {
     pub pin: String,
+    /// When set, the issued token is long-lived and persisted, so this device
+    /// can reconnect later without the PIN.
+    #[serde(default)]
+    pub trust_device: bool,
 }
 
 #[derive(Serialize)]
 pub struct ConnectResponse {
     pub token: String,
     pub system_info: SystemInfo,
+    /// Seconds until this token expires, so the app knows when to re-pair.
+    pub expires_in: u64,
+    /// Model the server will use when a request does not name one.
+    pub default_model: String,
+    /// Provider settings, delivered with the handshake rather than as a second
+    /// round trip — the phone's settings screen is populated the instant it
+    /// connects, and this payload is never written to storage on the device.
+    pub settings: SettingsPayload,
+    pub providers: Vec<ProviderOption>,
 }
 
 #[derive(Serialize, Clone)]
@@ -69,43 +84,290 @@ pub struct AnalyseErrorResponse {
     pub request_id: String,
 }
 
+/// Provider settings mirrored to the phone.
+///
+/// This carries real API keys, which is why it is only ever returned over the
+/// certificate-pinned connection to an authenticated client, and why the app
+/// holds it in memory only and drops it the moment it disconnects.
+#[derive(Serialize, Clone, Default)]
+pub struct SettingsPayload {
+    pub active_provider: String,
+    pub gemini_api_key: String,
+    pub gemini_model: String,
+    pub openrouter_api_key: String,
+    pub openrouter_model: String,
+    pub ollama_api_key: String,
+    pub ollama_base_url: String,
+    pub ollama_model: String,
+    pub deepgram_api_key: String,
+    pub asr_model: String,
+    pub resume_text: String,
+    pub job_description_text: String,
+}
+
+/// Incoming settings update.
+///
+/// Every field is optional and **absent fields are left untouched**. An earlier
+/// version reused the full payload here, so a partial update silently erased
+/// every field the caller omitted — a one-line curl wiped stored API keys.
+/// Clearing a value now requires explicitly sending an empty string.
+#[derive(Deserialize, Default)]
+#[serde(default)]
+pub struct SettingsUpdate {
+    pub active_provider: Option<String>,
+    pub gemini_api_key: Option<String>,
+    pub gemini_model: Option<String>,
+    pub openrouter_api_key: Option<String>,
+    pub openrouter_model: Option<String>,
+    pub ollama_api_key: Option<String>,
+    pub ollama_base_url: Option<String>,
+    pub ollama_model: Option<String>,
+    pub deepgram_api_key: Option<String>,
+    pub asr_model: Option<String>,
+    pub resume_text: Option<String>,
+    pub job_description_text: Option<String>,
+}
+
+impl SettingsUpdate {
+    /// Applies only the fields the caller actually sent.
+    fn merge_into(self, cfg: &mut brido_server::config::Config) {
+        fn set(target: &mut String, value: Option<String>) {
+            if let Some(v) = value {
+                *target = v;
+            }
+        }
+        set(&mut cfg.active_provider, self.active_provider);
+        set(&mut cfg.gemini_api_key, self.gemini_api_key);
+        set(&mut cfg.gemini_model, self.gemini_model);
+        set(&mut cfg.openrouter_api_key, self.openrouter_api_key);
+        set(&mut cfg.openrouter_model, self.openrouter_model);
+        set(&mut cfg.ollama_api_key, self.ollama_api_key);
+        set(&mut cfg.ollama_base_url, self.ollama_base_url);
+        set(&mut cfg.ollama_model, self.ollama_model);
+        set(&mut cfg.deepgram_api_key, self.deepgram_api_key);
+        set(&mut cfg.asr_model, self.asr_model);
+        set(&mut cfg.resume_text, self.resume_text);
+        set(&mut cfg.job_description_text, self.job_description_text);
+    }
+}
+
+/// Everything the phone's settings screen needs, in one payload.
 #[derive(Serialize)]
-pub struct QrInfoResponse {
-    pub ip: String,
-    pub port: u16,
-    pub pin: String,
+pub struct SettingsResponse {
+    #[serde(flatten)]
+    pub settings: SettingsPayload,
+    /// Selectable providers and their known models, so the phone does not have
+    /// to hardcode a list that would drift from the desktop's.
+    pub providers: Vec<ProviderOption>,
+}
+
+#[derive(Serialize, Clone)]
+pub struct ProviderOption {
+    pub label: String,
+    pub models: Vec<String>,
+    pub default_model: String,
+}
+
+impl SettingsPayload {
+    fn from_config(cfg: &brido_server::config::Config) -> Self {
+        Self {
+            active_provider: cfg.active_provider.clone(),
+            gemini_api_key: cfg.gemini_api_key.clone(),
+            gemini_model: cfg.gemini_model.clone(),
+            openrouter_api_key: cfg.openrouter_api_key.clone(),
+            openrouter_model: cfg.openrouter_model.clone(),
+            ollama_api_key: cfg.ollama_api_key.clone(),
+            ollama_base_url: cfg.ollama_base_url.clone(),
+            ollama_model: cfg.ollama_model.clone(),
+            deepgram_api_key: cfg.deepgram_api_key.clone(),
+            asr_model: cfg.asr_model.clone(),
+            resume_text: cfg.resume_text.clone(),
+            job_description_text: cfg.job_description_text.clone(),
+        }
+    }
+
+}
+
+fn provider_options() -> Vec<ProviderOption> {
+    use brido_server::config::ProviderKind;
+    ProviderKind::ALL
+        .iter()
+        .map(|kind| ProviderOption {
+            label: kind.label().to_string(),
+            models: kind.available_models().iter().map(|m| m.to_string()).collect(),
+            default_model: kind.default_model().to_string(),
+        })
+        .collect()
 }
 
 // ── Handlers ────────────────────────────────────────────────────────────────
 
-/// No auth required — returns info for QR code generation
-pub async fn handle_qr_info(
+/// Returns the desktop's current provider settings.
+pub async fn handle_get_settings(
+    headers: HeaderMap,
     State(state): State<Arc<AppState>>,
-) -> Json<QrInfoResponse> {
-    let ip = local_ip_address::local_ip()
-        .map(|ip| ip.to_string())
-        .unwrap_or_else(|_| "0.0.0.0".to_string());
-    Json(QrInfoResponse {
-        ip,
-        port: state.config.port,
-        pin: state.config.pin.clone(),
-    })
+) -> Result<Json<SettingsResponse>, StatusCode> {
+    verify_token(&headers, &state).await?;
+    let cfg = state.config();
+    Ok(Json(SettingsResponse {
+        settings: SettingsPayload::from_config(&cfg),
+        providers: provider_options(),
+    }))
 }
 
-pub async fn handle_connect(
+/// Applies settings edited on the phone, persisting them like the GUI does.
+///
+/// The body is taken as a raw string and parsed *after* the token check, so an
+/// unauthenticated caller cannot probe the payload schema by comparing a
+/// "malformed body" rejection against an "unauthorized" one.
+pub async fn handle_put_settings(
+    headers: HeaderMap,
     State(state): State<Arc<AppState>>,
-    Json(req): Json<ConnectRequest>,
-) -> Result<Json<ConnectResponse>, StatusCode> {
-    if req.pin != state.config.pin {
-        return Err(StatusCode::UNAUTHORIZED);
+    body: String,
+) -> Result<Json<SettingsResponse>, StatusCode> {
+    verify_token(&headers, &state).await?;
+
+    let req: SettingsUpdate =
+        serde_json::from_str(&body).map_err(|_| StatusCode::UNPROCESSABLE_ENTITY)?;
+
+    // Update the shared config first so in-flight requests pick it up
+    // immediately, then persist to disk.
+    let updated = {
+        let mut guard = state
+            .config
+            .write()
+            .unwrap_or_else(|e| e.into_inner());
+        req.merge_into(&mut guard);
+        guard.clone()
+    };
+
+    let models = {
+        use brido_server::config::ProviderKind;
+        let mut map = std::collections::HashMap::new();
+        map.insert(ProviderKind::Gemini, updated.gemini_model.clone());
+        map.insert(ProviderKind::OpenRouter, updated.openrouter_model.clone());
+        map.insert(ProviderKind::Ollama, updated.ollama_model.clone());
+        map
+    };
+
+    if let Err(e) = brido_server::config::save_overlay_settings(
+        &state.runtime_env,
+        &updated.active_provider,
+        &updated.asr_model,
+        &updated.gemini_api_key,
+        &updated.openrouter_api_key,
+        &updated.ollama_api_key,
+        &updated.ollama_base_url,
+        &updated.deepgram_api_key,
+        &updated.resume_text,
+        &updated.job_description_text,
+        &updated.overlay_hotkey_capture,
+        &updated.overlay_hotkey_toggle,
+        &updated.overlay_hotkey_settings,
+        &updated.overlay_hotkey_stealth,
+        &updated.overlay_hotkey_direct_type,
+        updated.strict_stealth_mode,
+        &models,
+    ) {
+        tracing::error!("Failed to persist settings from phone: {e}");
+        return Err(StatusCode::INTERNAL_SERVER_ERROR);
     }
 
-    let token = Uuid::new_v4().to_string();
-    state.active_tokens.write().await.insert(token.clone());
+    // Tell the overlay to reload so the desktop UI reflects the change.
+    state.settings_version.fetch_add(1, Ordering::SeqCst);
+    tracing::info!("Settings updated from paired device");
+
+    Ok(Json(SettingsResponse {
+        settings: SettingsPayload::from_config(&updated),
+        providers: provider_options(),
+    }))
+}
+
+/// Exchanges the pairing PIN for a bearer token.
+///
+/// The PIN is compared in constant time and every attempt is throttled per
+/// client address, so a six-digit PIN cannot be brute-forced over the network.
+pub async fn handle_connect(
+    State(state): State<Arc<AppState>>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    Json(req): Json<ConnectRequest>,
+) -> Result<Json<ConnectResponse>, axum::response::Response> {
+    use axum::response::IntoResponse;
+
+    let cfg = state.config();
+
+    match state
+        .auth
+        .check_pin(peer.ip(), &req.pin, &cfg.pin)
+        .await
+    {
+        PinOutcome::Ok => {}
+        PinOutcome::Invalid => return Err(StatusCode::UNAUTHORIZED.into_response()),
+        PinOutcome::LockedOut { retry_after } => {
+            // Tell the client exactly how long to back off.
+            let secs = retry_after.as_secs().max(1);
+            return Err((
+                StatusCode::TOO_MANY_REQUESTS,
+                [("Retry-After", secs.to_string())],
+                format!("Too many failed PIN attempts. Try again in {secs}s."),
+            )
+                .into_response());
+        }
+    }
+
+    let kind = if req.trust_device {
+        TokenKind::Trusted
+    } else {
+        TokenKind::Session
+    };
+    let token = state.auth.issue_token(kind).await;
     state.connected_count.fetch_add(1, Ordering::SeqCst);
 
-    let system_info = get_system_info();
-    Ok(Json(ConnectResponse { token, system_info }))
+    let ttl = match kind {
+        TokenKind::Trusted => crate::auth::TRUSTED_TTL,
+        TokenKind::Session => crate::auth::SESSION_TTL,
+    };
+
+    Ok(Json(ConnectResponse {
+        token,
+        system_info: get_system_info(),
+        expires_in: ttl.as_secs(),
+        default_model: cfg.active_model().to_string(),
+        settings: SettingsPayload::from_config(&cfg),
+        providers: provider_options(),
+    }))
+}
+
+/// Revokes the caller's token so it cannot be replayed after sign-out.
+pub async fn handle_disconnect(
+    headers: HeaderMap,
+    State(state): State<Arc<AppState>>,
+) -> StatusCode {
+    let Some(token) = bearer_token(&headers) else {
+        return StatusCode::BAD_REQUEST;
+    };
+
+    if state.auth.revoke(&token).await {
+        // Saturating so a double disconnect cannot wrap the counter.
+        let _ = state
+            .connected_count
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| {
+                Some(n.saturating_sub(1))
+            });
+        StatusCode::NO_CONTENT
+    } else {
+        StatusCode::UNAUTHORIZED
+    }
+}
+
+/// Extracts a `Bearer <token>` value from the Authorization header.
+fn bearer_token(headers: &HeaderMap) -> Option<String> {
+    headers
+        .get("Authorization")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+        .map(|t| t.trim().to_string())
+        .filter(|t| !t.is_empty())
 }
 
 pub async fn handle_system_info(
@@ -121,7 +383,7 @@ pub async fn handle_models(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Vec<ModelInfo>>, StatusCode> {
     verify_token(&headers, &state).await?;
-    Ok(Json(get_supported_models(&state.config)))
+    Ok(Json(get_supported_models(&state.config())))
 }
 
 pub async fn handle_analyse(
@@ -169,7 +431,10 @@ pub async fn handle_analyse(
             )
         })?;
 
-    let manager = ModelManager::new(&state.config, &state.http_client);
+    // Snapshot the *current* settings for this request, so provider keys
+    // edited in the GUI (or from the phone) take effect immediately.
+    let cfg = state.config();
+    let manager = ModelManager::new(&cfg, &state.http_client);
 
     let (result, model_used) = manager
         .analyse_image(&req.image_base64, req.model.as_deref(), req.prompt.as_deref())
@@ -231,13 +496,10 @@ fn map_analyse_error(
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
 async fn verify_token(headers: &HeaderMap, state: &Arc<AppState>) -> Result<(), StatusCode> {
-    let token = headers
-        .get("Authorization")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.strip_prefix("Bearer "))
-        .ok_or(StatusCode::UNAUTHORIZED)?;
+    let token = bearer_token(headers).ok_or(StatusCode::UNAUTHORIZED)?;
 
-    if !state.active_tokens.read().await.contains(token) {
+    // Rejects unknown *and* expired tokens.
+    if !state.auth.verify(&token).await {
         return Err(StatusCode::UNAUTHORIZED);
     }
 
@@ -309,4 +571,107 @@ fn get_supported_models(config: &crate::config::Config) -> Vec<ModelInfo> {
             size_gb,
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use brido_server::config::Config;
+    use std::sync::RwLock;
+
+    /// The bug this guards against: the HTTP server held a Config cloned at
+    /// startup, so a key entered in the desktop Settings panel never reached
+    /// phone requests — analysis failed with "authentication failed" while the
+    /// desktop's own capture worked with the new key.
+    #[test]
+    fn shared_config_reflects_later_edits() {
+        let shared = Arc::new(RwLock::new(Config::default()));
+
+        // Snapshot taken the way a handler takes one.
+        let before = shared.read().unwrap().clone();
+        assert_ne!(before.openrouter_api_key, "sk-or-new-key");
+
+        // Simulate the GUI publishing edited settings.
+        shared.write().unwrap().openrouter_api_key = "sk-or-new-key".to_string();
+
+        let after = shared.read().unwrap().clone();
+        assert_eq!(after.openrouter_api_key, "sk-or-new-key");
+    }
+
+    #[test]
+    fn settings_payload_reads_every_field_from_config() {
+        let mut cfg = Config::default();
+        cfg.active_provider = "OpenRouter".to_string();
+        cfg.openrouter_api_key = "sk-or-secret".to_string();
+        cfg.openrouter_model = "some/model".to_string();
+
+        let payload = SettingsPayload::from_config(&cfg);
+        assert_eq!(payload.openrouter_api_key, "sk-or-secret");
+        assert_eq!(payload.active_provider, "OpenRouter");
+        assert_eq!(payload.openrouter_model, "some/model");
+    }
+
+    /// Regression: a partial update once cleared every omitted field, which
+    /// erased stored API keys. Omitted fields must survive untouched.
+    #[test]
+    fn partial_update_preserves_unmentioned_fields() {
+        let mut cfg = Config::default();
+        cfg.gemini_api_key = "gemini-secret".to_string();
+        cfg.openrouter_api_key = "openrouter-secret".to_string();
+        cfg.deepgram_api_key = "deepgram-secret".to_string();
+        cfg.resume_text = "my resume".to_string();
+
+        // Only the model is being changed.
+        let update: SettingsUpdate =
+            serde_json::from_str(r#"{"openrouter_model":"new/model"}"#).expect("parses");
+        update.merge_into(&mut cfg);
+
+        assert_eq!(cfg.openrouter_model, "new/model");
+        assert_eq!(cfg.gemini_api_key, "gemini-secret");
+        assert_eq!(cfg.openrouter_api_key, "openrouter-secret");
+        assert_eq!(cfg.deepgram_api_key, "deepgram-secret");
+        assert_eq!(cfg.resume_text, "my resume");
+    }
+
+    /// Clearing a value must still be possible — but only explicitly.
+    #[test]
+    fn explicit_empty_string_clears_a_field() {
+        let mut cfg = Config::default();
+        cfg.gemini_api_key = "gemini-secret".to_string();
+
+        let update: SettingsUpdate =
+            serde_json::from_str(r#"{"gemini_api_key":""}"#).expect("parses");
+        update.merge_into(&mut cfg);
+
+        assert_eq!(cfg.gemini_api_key, "");
+    }
+
+    /// A request that names no model must resolve to the active provider's
+    /// model, never to a hardcoded free-tier one.
+    #[test]
+    fn active_model_follows_selected_provider() {
+        let mut cfg = Config::default();
+        cfg.gemini_model = "gemini-x".to_string();
+        cfg.openrouter_model = "openrouter-x".to_string();
+        cfg.ollama_model = "ollama-x".to_string();
+
+        cfg.active_provider = "Gemini".to_string();
+        assert_eq!(cfg.active_model(), "gemini-x");
+
+        cfg.active_provider = "OpenRouter".to_string();
+        assert_eq!(cfg.active_model(), "openrouter-x");
+
+        cfg.active_provider = "Ollama".to_string();
+        assert_eq!(cfg.active_model(), "ollama-x");
+    }
+
+    /// Partial payloads must deserialize, since the handler parses the body
+    /// itself after authenticating.
+    #[test]
+    fn partial_settings_payload_deserialises() {
+        let parsed: SettingsUpdate =
+            serde_json::from_str(r#"{"active_provider":"Gemini"}"#).expect("should parse");
+        assert_eq!(parsed.active_provider.as_deref(), Some("Gemini"));
+        assert!(parsed.openrouter_api_key.is_none());
+    }
 }
