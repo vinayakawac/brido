@@ -74,6 +74,8 @@ pub fn start_server(
     connected_count: Arc<AtomicUsize>,
     cert_fingerprint: Arc<std::sync::RwLock<Option<String>>>,
     trusted_store: std::path::PathBuf,
+    // Directory holding the persisted TLS certificate.
+    state_dir: std::path::PathBuf,
 ) -> axum_server::Handle {
     server_ready.store(false, Ordering::SeqCst);
     connected_count.store(0, Ordering::SeqCst);
@@ -96,10 +98,11 @@ pub fn start_server(
         rt.block_on(async move {
             // Capture parameters are fixed for the lifetime of the server, so
             // a snapshot is fine here; only provider settings change at runtime.
-            let (port, fps, target_w, target_h, quality) = {
+            let (port, bind_address, fps, target_w, target_h, quality) = {
                 let cfg = config.read().unwrap_or_else(|e| e.into_inner());
                 (
                     cfg.port,
+                    cfg.bind_address.clone(),
                     cfg.capture_fps,
                     cfg.target_width,
                     cfg.target_height,
@@ -192,7 +195,7 @@ pub fn start_server(
                 .with_state(state);
 
             let listener = loop {
-                match tokio::net::TcpListener::bind(format!("0.0.0.0:{port}")).await {
+                match tokio::net::TcpListener::bind(format!("{bind_address}:{port}")).await {
                     Ok(l) => break l,
                     Err(e) => {
                         eprintln!("Port {port} busy, retrying… ({e})");
@@ -203,10 +206,11 @@ pub fn start_server(
 
             ready_clone.store(true, Ordering::SeqCst);
             println!("  Server ready — listening on https://{ip}:{port}");
-            tracing::info!("Listening (HTTPS) on 0.0.0.0:{port}");
+            tracing::info!("Listening (HTTPS) on {bind_address}:{port}");
 
-            // Generate self-signed TLS certificate
-            let tls_cert = tls::generate_self_signed_cert(&ip);
+            // Reuse the stored certificate when possible, so pinned phones
+            // keep working across restarts.
+            let tls_cert = tls::load_or_create_cert(&state_dir, &ip);
 
             // Publish the fingerprint so the QR code can carry it and the app
             // can pin against this exact certificate.

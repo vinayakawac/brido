@@ -275,6 +275,14 @@ private fun ManualEntryTab(
                 Text("Reconnect without PIN", color = Color.White, fontWeight = FontWeight.Bold)
             }
             Spacer(Modifier.height(8.dp))
+        }
+
+        // Always reachable whenever anything is pinned for this server —
+        // otherwise a legitimate server restart (new certificate) leaves the
+        // phone stuck with no way to clear the old pin.
+        if ((viewModel.hasTrustedSession || viewModel.hasPinnedCertificate) &&
+            !viewModel.isConnected
+        ) {
             TextButton(onClick = { viewModel.forgetThisDevice() }) {
                 Text("Forget this device", color = BridoTextSecondary, fontSize = 13.sp)
             }

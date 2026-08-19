@@ -8,8 +8,32 @@
 
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYBD_EVENT_FLAGS, KEYEVENTF_KEYUP,
-    KEYEVENTF_UNICODE, VK_RETURN, VK_BACK, VK_TAB,
+    KEYEVENTF_UNICODE, VK_BACK, VK_DELETE, VK_DOWN, VK_END, VK_HOME, VK_LEFT, VK_RETURN, VK_RIGHT,
+    VK_TAB, VK_UP,
 };
+
+/// Named editing keys the phone can send, so the remote keyboard can move the
+/// caret and delete rather than only appending text.
+pub fn press_named_key(name: &str) -> bool {
+    let vk = match name.to_ascii_lowercase().as_str() {
+        "backspace" => VK_BACK.0,
+        "delete" => VK_DELETE.0,
+        "left" => VK_LEFT.0,
+        "right" => VK_RIGHT.0,
+        "up" => VK_UP.0,
+        "down" => VK_DOWN.0,
+        "home" => VK_HOME.0,
+        "end" => VK_END.0,
+        "enter" => VK_RETURN.0,
+        "tab" => VK_TAB.0,
+        _ => return false,
+    };
+    send_pair(
+        make_input_vk(vk, KEYBD_EVENT_FLAGS(0)),
+        make_input_vk(vk, KEYEVENTF_KEYUP),
+    );
+    true
+}
 
 /// Types `text` into the focused window as a sequence of Unicode key events.
 ///

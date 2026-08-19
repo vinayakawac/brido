@@ -161,6 +161,8 @@ data class TypeRequest(
     val text: String,
     /** Backspaces to send before typing, for phone-side edits. */
     val backspaces: Int = 0,
+    /** Named editing key: backspace, delete, left, right, up, down, enter, tab. */
+    val key: String? = null,
 )
 
 data class TypeResponse(

@@ -69,10 +69,15 @@ pub struct AnalyseRequest {
 /// Remote-keyboard request: text to type into the focused window on the PC.
 #[derive(Deserialize)]
 pub struct TypeRequest {
+    #[serde(default)]
     pub text: String,
     /// Number of backspaces to send before typing (phone-side edits).
     #[serde(default)]
     pub backspaces: usize,
+    /// Optional named editing key: backspace, delete, left, right, up, down,
+    /// home, end, enter, tab. Sent instead of / alongside `text`.
+    #[serde(default)]
+    pub key: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -334,8 +339,9 @@ pub async fn handle_connect(
     } else {
         TokenKind::Session
     };
+    // The device count reflects live streams, not tokens issued, so it is
+    // maintained by the WebSocket handler rather than here.
     let token = state.auth.issue_token(kind).await;
-    state.connected_count.fetch_add(1, Ordering::SeqCst);
 
     let ttl = match kind {
         TokenKind::Trusted => crate::auth::TRUSTED_TTL,
@@ -362,12 +368,7 @@ pub async fn handle_disconnect(
     };
 
     if state.auth.revoke(&token).await {
-        // Saturating so a double disconnect cannot wrap the counter.
-        let _ = state
-            .connected_count
-            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| {
-                Some(n.saturating_sub(1))
-            });
+        // The stream's own close decrements the device count.
         StatusCode::NO_CONTENT
     } else {
         StatusCode::UNAUTHORIZED
@@ -394,10 +395,16 @@ pub async fn handle_type(
 
     let text = req.text.clone();
     let backspaces = req.backspaces;
+    let key = req.key.clone();
 
     let typed = tokio::task::spawn_blocking(move || {
         if backspaces > 0 {
             crate::remote_type::backspace(backspaces);
+        }
+        if let Some(name) = key.as_deref() {
+            if !crate::remote_type::press_named_key(name) {
+                tracing::warn!("Ignoring unknown key name: {name}");
+            }
         }
         crate::remote_type::type_text(&text)
     })
