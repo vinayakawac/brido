@@ -112,12 +112,15 @@ fn main() {
     let connected_count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
     // Filled in by the server thread once TLS is up; the QR code needs it.
     let cert_fingerprint = std::sync::Arc::new(std::sync::RwLock::new(None::<String>));
-    // Trusted devices live beside the env file so they survive a restart.
-    let trusted_store = runtime_env
+    // Trusted devices and the TLS certificate live beside the env file so both
+    // survive a restart — otherwise a new certificate each launch would break
+    // every phone that pinned the old one.
+    let state_dir = runtime_env
         .active_env_path
         .parent()
         .unwrap_or_else(|| std::path::Path::new("."))
-        .join("trusted_devices.txt");
+        .to_path_buf();
+    let trusted_store = state_dir.join("trusted_devices.txt");
 
     // One shared Config for both the GUI and the HTTP API. Previously the
     // server got a clone at startup, so provider keys edited in Settings never
@@ -134,6 +137,7 @@ fn main() {
         connected_count.clone(),
         cert_fingerprint.clone(),
         trusted_store,
+        state_dir,
     );
 
     let ip = local_ip_address::local_ip()

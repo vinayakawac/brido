@@ -4,6 +4,7 @@ import android.graphics.Bitmap
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -11,6 +12,7 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -253,15 +255,48 @@ fun StreamScreen(
         }
 
         if (remoteMode) {
+            // Editing keys, so the remote keyboard can fix mistakes and move
+            // the caret rather than only appending text.
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp)
+                    .padding(top = 6.dp),
+            ) {
+                listOf(
+                    "⌫" to "backspace",
+                    "⌦" to "delete",
+                    "←" to "left",
+                    "→" to "right",
+                    "↑" to "up",
+                    "↓" to "down",
+                    "⏎" to "enter",
+                ).forEach { (label, key) ->
+                    Button(
+                        onClick = { viewModel.sendRemoteKey(key) },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = BridoSurfaceVariant,
+                        ),
+                        shape = RoundedCornerShape(6.dp),
+                        contentPadding = PaddingValues(horizontal = 4.dp, vertical = 4.dp),
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Text(label, color = BridoTextPrimary, fontSize = 14.sp)
+                    }
+                }
+            }
+
             Text(
                 "Remote keyboard: text types into whatever window is focused on your PC.",
                 color = BridoTextSecondary,
                 fontSize = 11.sp,
-                modifier = Modifier.padding(horizontal = 14.dp, vertical = 2.dp),
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 4.dp),
             )
         }
 
-        // ── Analyse Button ───────────────────────────────────────────────
+        // ── Analyse Button (AI mode only) ────────────────────────────────
+        if (!remoteMode) {
         Button(
             onClick = {
                 focusManager.clearFocus()
@@ -292,6 +327,7 @@ fun StreamScreen(
                     fontFamily = FontFamily.Serif,
                 )
             }
+        }
         }
 
         // ── Disconnect Button ────────────────────────────────────────────

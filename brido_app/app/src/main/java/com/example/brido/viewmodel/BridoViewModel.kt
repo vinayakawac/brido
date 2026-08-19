@@ -67,6 +67,17 @@ class BridoViewModel(application: Application) : AndroidViewModel(application) {
     val hasTrustedSession: Boolean
         get() = store.trustedTokenFor(serverIp, serverPort) != null
 
+    /**
+     * True when a certificate is pinned for this server.
+     *
+     * Exposed so the UI can always offer "Forget this device": a phone that
+     * pinned a certificate on first use, without saving a trusted session, was
+     * otherwise stuck after a legitimate server restart with no way to clear
+     * the stale pin.
+     */
+    val hasPinnedCertificate: Boolean
+        get() = store.fingerprintFor(serverIp) != null
+
     // ── Stream state ─────────────────────────────────────────────────────
     var currentFrame by mutableStateOf<Bitmap?>(null)
         private set
@@ -99,12 +110,27 @@ class BridoViewModel(application: Application) : AndroidViewModel(application) {
 
     /** Types [text] at the PC's cursor. Errors surface in the terminal. */
     fun sendRemoteType(text: String) {
+        if (text.isEmpty()) return
+        dispatchType(com.example.brido.models.TypeRequest(text = text))
+    }
+
+    /**
+     * Presses a named editing key on the PC.
+     *
+     * Accepted names match the server: backspace, delete, left, right, up,
+     * down, home, end, enter, tab.
+     */
+    fun sendRemoteKey(key: String) {
+        dispatchType(com.example.brido.models.TypeRequest(text = "", key = key))
+    }
+
+    private fun dispatchType(request: com.example.brido.models.TypeRequest) {
         val service = apiService ?: return
-        if (token.isBlank() || text.isEmpty()) return
+        if (token.isBlank()) return
         viewModelScope.launch {
             try {
                 withContext(Dispatchers.IO) {
-                    service.typeText("Bearer $token", com.example.brido.models.TypeRequest(text = text))
+                    service.typeText("Bearer $token", request)
                 }
             } catch (e: Exception) {
                 addTerminalLine("> type failed: ${e.message ?: "unknown error"}")
@@ -324,6 +350,9 @@ class BridoViewModel(application: Application) : AndroidViewModel(application) {
         store.clearFingerprintFor(serverIp)
         expectedFingerprint = null
         trustDevice = false
+        // Clear the pin-mismatch message so it is obvious the state was reset
+        // and the next attempt starts fresh.
+        connectionError = null
     }
 
     private fun startStream() {

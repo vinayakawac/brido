@@ -684,6 +684,13 @@ impl OverlayApp {
                         });
                         ui.end_row();
 
+                        ui.label(RichText::new("Settings:").color(TEXT_PRIMARY));
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new("Ctrl +").color(TEXT_DIM));
+                            ui.add(egui::TextEdit::singleline(&mut self.settings_hotkey_settings).desired_width(100.0));
+                        });
+                        ui.end_row();
+
                         ui.label(RichText::new("Toggle Stealth:").color(TEXT_PRIMARY));
                         ui.horizontal(|ui| {
                             ui.label(RichText::new("Ctrl +").color(TEXT_DIM));
@@ -722,7 +729,6 @@ impl OverlayApp {
                         let cap_suffix = self.settings_hotkey_capture.trim().to_uppercase();
                         let tog_suffix = self.settings_hotkey_toggle.trim().to_uppercase();
                         
-                        // We also need to get settings_hotkey_settings to uppercase but since it isn't shown in UI currently we just use it
                         let set_suffix = self.settings_hotkey_settings.trim().to_uppercase();
 
                         if !is_valid_hotkey_suffix(&cap_suffix) {
@@ -1060,21 +1066,33 @@ impl eframe::App for OverlayApp {
                     ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);
                 }
 
-                // Voice Toggle Icon
-                let voice_rect = egui::Rect::from_min_size(
-                    drag_r.right_top() + egui::vec2(-106.0, 2.0),
-                    Vec2::new(24.0, 24.0),
-                );
-                let voice_resp = ui.interact(voice_rect, ui.id().with("voice"), egui::Sense::click());
-                ui.painter().text(
-                    voice_rect.center(),
-                    egui::Align2::CENTER_CENTER,
-                    if self.voice_mode { "🎙" } else { "🎤" },
-                    FontId::new(14.0, FontFamily::Proportional),
-                    if voice_resp.hovered() { TEXT_PRIMARY } else if self.voice_mode { ACCENT } else { TEXT_DIM },
-                );
-                if voice_resp.clicked() {
-                    self.toggle_voice_mode();
+                // Voice toggle is hidden until the feature actually works —
+                // it previously occupied prime title-bar space while only
+                // reporting "In development". Set BRIDO_SHOW_VOICE=1 to show
+                // it while developing.
+                if std::env::var("BRIDO_SHOW_VOICE").as_deref() == Ok("1") {
+                    let voice_rect = egui::Rect::from_min_size(
+                        drag_r.right_top() + egui::vec2(-106.0, 2.0),
+                        Vec2::new(24.0, 24.0),
+                    );
+                    let voice_resp =
+                        ui.interact(voice_rect, ui.id().with("voice"), egui::Sense::click());
+                    ui.painter().text(
+                        voice_rect.center(),
+                        egui::Align2::CENTER_CENTER,
+                        if self.voice_mode { "🎙" } else { "🎤" },
+                        FontId::new(14.0, FontFamily::Proportional),
+                        if voice_resp.hovered() {
+                            TEXT_PRIMARY
+                        } else if self.voice_mode {
+                            ACCENT
+                        } else {
+                            TEXT_DIM
+                        },
+                    );
+                    if voice_resp.clicked() {
+                        self.toggle_voice_mode();
+                    }
                 }
 
                 // Gear Icon
