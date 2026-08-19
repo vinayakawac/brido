@@ -66,6 +66,20 @@ pub struct AnalyseRequest {
     pub prompt: Option<String>,
 }
 
+/// Remote-keyboard request: text to type into the focused window on the PC.
+#[derive(Deserialize)]
+pub struct TypeRequest {
+    pub text: String,
+    /// Number of backspaces to send before typing (phone-side edits).
+    #[serde(default)]
+    pub backspaces: usize,
+}
+
+#[derive(Serialize)]
+pub struct TypeResponse {
+    pub typed: usize,
+}
+
 #[derive(Serialize)]
 pub struct AnalyseResponse {
     pub result: String,
@@ -358,6 +372,39 @@ pub async fn handle_disconnect(
     } else {
         StatusCode::UNAUTHORIZED
     }
+}
+
+/// Types text into whatever window has focus on the PC (remote keyboard).
+///
+/// This is a plain input-injection endpoint, like a Bluetooth keyboard: it
+/// synthesises normal key events for the focused app and does nothing to hide
+/// itself. Runs on a blocking thread because `SendInput` is a blocking Win32
+/// call.
+pub async fn handle_type(
+    headers: HeaderMap,
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<TypeRequest>,
+) -> Result<Json<TypeResponse>, StatusCode> {
+    verify_token(&headers, &state).await?;
+
+    // Bound the payload so a single request cannot flood the input queue.
+    if req.text.chars().count() > 10_000 || req.backspaces > 1_000 {
+        return Err(StatusCode::PAYLOAD_TOO_LARGE);
+    }
+
+    let text = req.text.clone();
+    let backspaces = req.backspaces;
+
+    let typed = tokio::task::spawn_blocking(move || {
+        if backspaces > 0 {
+            crate::remote_type::backspace(backspaces);
+        }
+        crate::remote_type::type_text(&text)
+    })
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    Ok(Json(TypeResponse { typed }))
 }
 
 /// Extracts a `Bearer <token>` value from the Authorization header.

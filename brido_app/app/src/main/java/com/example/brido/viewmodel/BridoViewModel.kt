@@ -92,6 +92,26 @@ class BridoViewModel(application: Application) : AndroidViewModel(application) {
     var canRetryStream by mutableStateOf(false)
         private set
 
+    // ── Remote keyboard ──────────────────────────────────────────────────
+    /** When on, the text box types into the PC's focused window instead of
+     *  sending an AI question. */
+    var remoteTypeMode by mutableStateOf(false)
+
+    /** Types [text] at the PC's cursor. Errors surface in the terminal. */
+    fun sendRemoteType(text: String) {
+        val service = apiService ?: return
+        if (token.isBlank() || text.isEmpty()) return
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) {
+                    service.typeText("Bearer $token", com.example.brido.models.TypeRequest(text = text))
+                }
+            } catch (e: Exception) {
+                addTerminalLine("> type failed: ${e.message ?: "unknown error"}")
+            }
+        }
+    }
+
     // ── Synced desktop settings ──────────────────────────────────────────
     // Deliberately in-memory only. These carry live API keys, so they arrive
     // with the handshake, are never written to disk on the phone, and are

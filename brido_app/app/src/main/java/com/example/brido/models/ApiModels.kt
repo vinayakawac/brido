@@ -154,3 +154,15 @@ data class ApiError(
     val attempts: List<ProviderAttemptInfo>? = null,
     @SerializedName("request_id") val requestId: String? = null,
 )
+
+
+/** Remote-keyboard request: text to type at the PC's cursor. */
+data class TypeRequest(
+    val text: String,
+    /** Backspaces to send before typing, for phone-side edits. */
+    val backspaces: Int = 0,
+)
+
+data class TypeResponse(
+    val typed: Int = 0,
+)

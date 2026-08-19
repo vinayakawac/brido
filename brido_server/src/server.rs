@@ -187,6 +187,7 @@ pub fn start_server(
                     get(ai_server::handle_get_settings).put(ai_server::handle_put_settings),
                 )
                 .route("/api/analyse", post(ai_server::handle_analyse))
+                .route("/api/type", post(ai_server::handle_type))
                 .route("/ws/stream", get(stream_server::ws_handler))
                 .with_state(state);
 

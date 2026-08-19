@@ -12,6 +12,7 @@ mod ai_client;
 mod auth;
 mod capture_trigger;
 mod hotkey;
+mod remote_type;
 mod stealth;
 mod window;
 mod server;
