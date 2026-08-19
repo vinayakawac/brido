@@ -2,6 +2,7 @@ package com.example.brido.screens
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -15,19 +16,12 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
@@ -41,7 +35,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -49,8 +45,17 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.brido.models.SettingsPayload
+import com.example.brido.ui.components.GroupLabel
+import com.example.brido.ui.components.HairLine
+import com.example.brido.ui.components.InstrumentShape
+import com.example.brido.ui.components.NotePanel
+import com.example.brido.ui.components.PrimaryAction
+import com.example.brido.ui.components.SecondaryAction
 import com.example.brido.ui.theme.BridoAccent
+import com.example.brido.ui.theme.BridoDanger
 import com.example.brido.ui.theme.BridoDark
+import com.example.brido.ui.theme.BridoLine
+import com.example.brido.ui.theme.BridoOnAccent
 import com.example.brido.ui.theme.BridoSurface
 import com.example.brido.ui.theme.BridoSurfaceVariant
 import com.example.brido.ui.theme.BridoTextPrimary
@@ -60,9 +65,9 @@ import com.example.brido.viewmodel.BridoViewModel
 /**
  * Mirrors the desktop overlay's settings panel.
  *
- * The values shown here were synced from the desktop when this device
- * connected; saving pushes them back, where they are applied immediately and
- * written to `.env.local`. Nothing on this screen is stored on the phone.
+ * Values were synced from the desktop when this device connected; saving pushes
+ * them back, where they are applied immediately and written to `.env.local`.
+ * Nothing on this screen is stored on the phone.
  */
 @Composable
 fun SettingsScreen(
@@ -70,13 +75,10 @@ fun SettingsScreen(
     onGoBack: () -> Unit = {},
 ) {
     val synced = viewModel.settings
-
-    // Local working copy so edits are not pushed on every keystroke.
     var draft by remember(synced) { mutableStateOf(synced ?: SettingsPayload()) }
     var showKey by remember { mutableStateOf(false) }
     var showDeepgram by remember { mutableStateOf(false) }
 
-    // Settings only exist while connected; leave if the session ended.
     LaunchedEffect(viewModel.isConnected) {
         if (!viewModel.isConnected) onGoBack()
     }
@@ -93,174 +95,130 @@ fun SettingsScreen(
             modifier = Modifier
                 .fillMaxWidth()
                 .clickable { onGoBack() }
-                .padding(horizontal = 12.dp, vertical = 10.dp),
+                .padding(horizontal = 12.dp, vertical = 12.dp),
         ) {
             Icon(
                 Icons.AutoMirrored.Filled.ArrowBack,
-                contentDescription = "Go back",
+                contentDescription = "Back",
                 tint = BridoTextSecondary,
                 modifier = Modifier.size(18.dp),
             )
-            Spacer(Modifier.width(6.dp))
+            Spacer(Modifier.width(8.dp))
             Text(
-                "seTTings",
-                color = BridoTextSecondary,
-                fontSize = 14.sp,
-                fontFamily = FontFamily.Serif,
+                "Settings",
+                color = BridoTextPrimary,
+                fontSize = 15.sp,
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.Bold,
             )
         }
 
         if (synced == null) {
-            Text(
-                "Settings sync when you connect to the desktop.",
-                color = BridoTextSecondary,
-                fontSize = 14.sp,
-                modifier = Modifier.padding(16.dp),
+            NotePanel(
+                "Settings sync from your PC when you connect.",
+                Modifier.padding(horizontal = 14.dp),
             )
             return@Column
         }
 
-        Column(modifier = Modifier.padding(horizontal = 16.dp)) {
+        val activeProvider = draft.activeProvider
+        val activeOption = viewModel.providers.firstOrNull { it.label == activeProvider }
 
-            SectionLabel("Active provider")
+        Column(modifier = Modifier.padding(horizontal = 14.dp)) {
+
+            GroupLabel("Provider")
             ChipRow(
                 items = viewModel.providers.map { it.label },
-                selected = draft.activeProvider,
+                selected = activeProvider,
                 onSelect = { draft = draft.copy(activeProvider = it) },
             )
 
-            val activeProvider = draft.activeProvider
-            val activeOption = viewModel.providers.firstOrNull { it.label == activeProvider }
-
-            SectionLabel("Model")
+            GroupLabel("Model")
             ChipRow(
                 items = activeOption?.models.orEmpty(),
                 selected = draft.modelFor(activeProvider),
                 onSelect = { draft = draft.withModelFor(activeProvider, it) },
-                fontSize = 12.sp,
+                fontSize = 11.sp,
             )
-
             Spacer(Modifier.height(8.dp))
-            // Free-form, because providers add models faster than this list.
-            SecretField(
-                label = "Model name",
+            // Free-form: providers add models faster than any bundled list.
+            MonoInput(
                 value = draft.modelFor(activeProvider),
                 onValueChange = { draft = draft.withModelFor(activeProvider, it) },
-                masked = false,
-                onToggleMask = null,
+                placeholder = "model name",
             )
 
-            SectionLabel("$activeProvider API key")
-            SecretField(
-                label = "API key",
+            GroupLabel("Credentials")
+            SecretInput(
+                label = "$activeProvider key",
                 value = draft.keyFor(activeProvider),
                 onValueChange = { draft = draft.withKeyFor(activeProvider, it) },
-                masked = !showKey,
-                onToggleMask = { showKey = !showKey },
+                revealed = showKey,
+                onToggleReveal = { showKey = !showKey },
             )
-
             if (activeProvider == "Ollama") {
-                SectionLabel("Ollama base URL")
-                SecretField(
-                    label = "Base URL",
+                Spacer(Modifier.height(10.dp))
+                MonoInput(
                     value = draft.ollamaBaseUrl,
                     onValueChange = { draft = draft.copy(ollamaBaseUrl = it) },
-                    masked = false,
-                    onToggleMask = null,
+                    placeholder = "http://127.0.0.1:11434/v1",
                 )
             }
-
-            SectionLabel("Deepgram (voice)")
-            SecretField(
-                label = "Deepgram API key",
+            Spacer(Modifier.height(10.dp))
+            SecretInput(
+                label = "Deepgram key",
                 value = draft.deepgramApiKey,
                 onValueChange = { draft = draft.copy(deepgramApiKey = it) },
-                masked = !showDeepgram,
-                onToggleMask = { showDeepgram = !showDeepgram },
+                revealed = showDeepgram,
+                onToggleReveal = { showDeepgram = !showDeepgram },
             )
 
-            SectionLabel("Context")
-            SecretField(
-                label = "Resume",
+            GroupLabel("Context")
+            MonoInput(
                 value = draft.resumeText,
                 onValueChange = { draft = draft.copy(resumeText = it) },
-                masked = false,
-                onToggleMask = null,
+                placeholder = "Résumé",
                 singleLine = false,
             )
-            Spacer(Modifier.height(8.dp))
-            SecretField(
-                label = "Job description",
+            Spacer(Modifier.height(10.dp))
+            MonoInput(
                 value = draft.jobDescriptionText,
                 onValueChange = { draft = draft.copy(jobDescriptionText = it) },
-                masked = false,
-                onToggleMask = null,
+                placeholder = "Job description",
                 singleLine = false,
             )
 
-            Spacer(Modifier.height(20.dp))
+            Spacer(Modifier.height(22.dp))
 
-            Button(
+            PrimaryAction(
+                label = "Save to PC",
+                busy = viewModel.isSavingSettings,
                 onClick = { viewModel.saveSettings(draft) },
-                enabled = !viewModel.isSavingSettings,
-                modifier = Modifier.fillMaxWidth().height(50.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = BridoSurfaceVariant),
-                shape = RoundedCornerShape(8.dp),
-            ) {
-                if (viewModel.isSavingSettings) {
-                    CircularProgressIndicator(
-                        color = BridoAccent,
-                        modifier = Modifier.size(22.dp),
-                        strokeWidth = 2.dp,
-                    )
-                } else {
-                    Text(
-                        "Save to desktop",
-                        color = BridoTextPrimary,
-                        fontWeight = FontWeight.Bold,
-                    )
-                }
-            }
-
+            )
             Spacer(Modifier.height(8.dp))
-
-            Row {
-                Button(
-                    onClick = { viewModel.refreshSettings() },
-                    modifier = Modifier.weight(1f),
-                    colors = ButtonDefaults.buttonColors(containerColor = BridoSurface),
-                    shape = RoundedCornerShape(8.dp),
-                ) {
-                    Text("Reload from desktop", color = BridoTextSecondary, fontSize = 13.sp)
-                }
-            }
+            SecondaryAction(
+                label = "Reload from PC",
+                onClick = { viewModel.refreshSettings() },
+                modifier = Modifier.fillMaxWidth(),
+            )
 
             viewModel.settingsMessage?.let { message ->
-                Spacer(Modifier.height(10.dp))
+                Spacer(Modifier.height(12.dp))
                 Text(
                     message,
-                    color = if (message.startsWith("Saved")) BridoAccent else Color(0xFFFF6B6B),
-                    fontSize = 13.sp,
+                    color = if (message.startsWith("Saved")) BridoAccent else BridoDanger,
+                    fontSize = 12.5.sp,
                 )
             }
 
-            Spacer(Modifier.height(16.dp))
-
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(containerColor = BridoSurface),
-                shape = RoundedCornerShape(12.dp),
-            ) {
-                Text(
-                    "These credentials live only in memory on this phone. They are " +
-                        "cleared the moment you disconnect, even for a trusted device.",
-                    color = BridoTextSecondary,
-                    fontSize = 12.sp,
-                    modifier = Modifier.padding(14.dp),
-                )
-            }
-
-            Spacer(Modifier.height(24.dp))
+            Spacer(Modifier.height(18.dp))
+            HairLine()
+            Spacer(Modifier.height(14.dp))
+            NotePanel(
+                "These keys live in memory on this phone only. They are cleared " +
+                    "the moment you disconnect, even for a trusted device.",
+            )
+            Spacer(Modifier.height(28.dp))
         }
     }
 }
@@ -268,92 +226,122 @@ fun SettingsScreen(
 /**
  * Horizontally scrolling row of selectable chips.
  *
- * Deliberately built from a plain scrollable [Row] rather than `FlowRow`: that
- * API is experimental and its signature changed between Compose 1.7 and 1.9,
- * which crashed this screen with a `NoSuchMethodError` when the compile and
- * runtime versions of `foundation-layout` disagreed. A Row is stable across
- * versions, and horizontal scrolling suits long model names on a phone.
+ * A plain scrollable Row rather than FlowRow: that API is experimental and its
+ * signature changed between Compose 1.7 and 1.9, which crashed this screen when
+ * the compile and runtime versions disagreed.
  */
 @Composable
 private fun ChipRow(
     items: List<String>,
     selected: String,
     onSelect: (String) -> Unit,
-    fontSize: androidx.compose.ui.unit.TextUnit = 13.sp,
+    fontSize: androidx.compose.ui.unit.TextUnit = 12.sp,
 ) {
     Row(
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
         modifier = Modifier
             .fillMaxWidth()
             .horizontalScroll(rememberScrollState()),
     ) {
         items.forEach { item ->
             val isSelected = item == selected
-            Button(
-                onClick = { onSelect(item) },
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = if (isSelected) BridoAccent else BridoSurfaceVariant,
-                ),
-                shape = RoundedCornerShape(8.dp),
-            ) {
-                Text(
-                    item,
-                    color = if (isSelected) Color.White else BridoTextSecondary,
-                    fontSize = fontSize,
-                    maxLines = 1,
-                )
-            }
+            Text(
+                item,
+                color = if (isSelected) BridoOnAccent else BridoTextSecondary,
+                fontSize = fontSize,
+                fontFamily = FontFamily.Monospace,
+                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                maxLines = 1,
+                modifier = Modifier
+                    .clip(InstrumentShape)
+                    .background(if (isSelected) BridoAccent else BridoSurfaceVariant)
+                    .clickable { onSelect(item) }
+                    .padding(horizontal = 12.dp, vertical = 9.dp),
+            )
         }
     }
 }
 
 @Composable
-private fun SectionLabel(text: String) {
-    Spacer(Modifier.height(16.dp))
-    Text(text, color = BridoTextSecondary, fontSize = 12.sp)
-    Spacer(Modifier.height(4.dp))
-}
-
-@Composable
-private fun SecretField(
+private fun SecretInput(
     label: String,
     value: String,
     onValueChange: (String) -> Unit,
-    masked: Boolean,
-    onToggleMask: (() -> Unit)?,
+    revealed: Boolean,
+    onToggleReveal: () -> Unit,
+) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = onValueChange,
+        placeholder = {
+            Text(
+                label,
+                color = BridoTextSecondary.copy(alpha = 0.55f),
+                fontFamily = FontFamily.Monospace,
+                fontSize = 13.sp,
+            )
+        },
+        singleLine = true,
+        shape = InstrumentShape,
+        visualTransformation = if (revealed) VisualTransformation.None
+        else PasswordVisualTransformation(),
+        textStyle = TextStyle(
+            fontFamily = FontFamily.Monospace,
+            fontSize = 13.sp,
+            color = BridoTextPrimary,
+        ),
+        trailingIcon = {
+            IconButton(onClick = onToggleReveal) {
+                Icon(
+                    if (revealed) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                    contentDescription = if (revealed) "Hide" else "Show",
+                    tint = BridoTextSecondary,
+                )
+            }
+        },
+        colors = fieldColors(),
+        modifier = Modifier.fillMaxWidth(),
+    )
+}
+
+@Composable
+private fun MonoInput(
+    value: String,
+    onValueChange: (String) -> Unit,
+    placeholder: String,
     singleLine: Boolean = true,
 ) {
     OutlinedTextField(
         value = value,
         onValueChange = onValueChange,
         placeholder = {
-            Text(label, color = BridoTextSecondary.copy(alpha = 0.5f), fontSize = 13.sp)
+            Text(
+                placeholder,
+                color = BridoTextSecondary.copy(alpha = 0.55f),
+                fontFamily = FontFamily.Monospace,
+                fontSize = 13.sp,
+            )
         },
         singleLine = singleLine,
         minLines = if (singleLine) 1 else 3,
-        visualTransformation = if (masked) {
-            PasswordVisualTransformation()
-        } else {
-            VisualTransformation.None
-        },
-        trailingIcon = onToggleMask?.let { toggle ->
-            {
-                IconButton(onClick = toggle) {
-                    Icon(
-                        if (masked) Icons.Default.Visibility else Icons.Default.VisibilityOff,
-                        contentDescription = if (masked) "Show" else "Hide",
-                        tint = BridoTextSecondary,
-                    )
-                }
-            }
-        },
-        colors = OutlinedTextFieldDefaults.colors(
-            focusedTextColor = BridoTextPrimary,
-            unfocusedTextColor = BridoTextPrimary,
-            cursorColor = BridoAccent,
-            focusedBorderColor = BridoAccent,
-            unfocusedBorderColor = BridoSurfaceVariant,
+        shape = InstrumentShape,
+        textStyle = TextStyle(
+            fontFamily = FontFamily.Monospace,
+            fontSize = 13.sp,
+            color = BridoTextPrimary,
         ),
+        colors = fieldColors(),
         modifier = Modifier.fillMaxWidth(),
     )
 }
+
+@Composable
+private fun fieldColors() = OutlinedTextFieldDefaults.colors(
+    focusedTextColor = BridoTextPrimary,
+    unfocusedTextColor = BridoTextPrimary,
+    cursorColor = BridoAccent,
+    focusedBorderColor = BridoAccent,
+    unfocusedBorderColor = BridoLine,
+    focusedContainerColor = Color.Transparent,
+    unfocusedContainerColor = Color.Transparent,
+)

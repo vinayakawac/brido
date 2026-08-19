@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use rcgen::{generate_simple_self_signed, CertifiedKey};
 use sha2::{Digest, Sha256};

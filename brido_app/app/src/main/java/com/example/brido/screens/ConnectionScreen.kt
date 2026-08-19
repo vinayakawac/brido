@@ -1,41 +1,32 @@
 package com.example.brido.screens
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.CheckBox
-import androidx.compose.material.icons.filled.CheckBoxOutlineBlank
-import androidx.compose.material.icons.filled.QrCodeScanner
-import androidx.compose.material.icons.filled.Keyboard
-import androidx.compose.material.icons.filled.Info
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
-import androidx.compose.material3.Tab
-import androidx.compose.material3.TabRow
-import androidx.compose.material3.TabRowDefaults.SecondaryIndicator
-import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -43,25 +34,28 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.systemBars
-import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.brido.ui.components.GroupLabel
+import com.example.brido.ui.components.InstrumentShape
+import com.example.brido.ui.components.NotePanel
+import com.example.brido.ui.components.PrimaryAction
+import com.example.brido.ui.components.SecondaryAction
 import com.example.brido.ui.theme.BridoAccent
+import com.example.brido.ui.theme.BridoDanger
 import com.example.brido.ui.theme.BridoDark
+import com.example.brido.ui.theme.BridoLine
+import com.example.brido.ui.theme.BridoOnAccent
 import com.example.brido.ui.theme.BridoSurface
-import com.example.brido.ui.theme.BridoSurfaceVariant
 import com.example.brido.ui.theme.BridoTextPrimary
 import com.example.brido.ui.theme.BridoTextSecondary
 import com.example.brido.viewmodel.BridoViewModel
@@ -72,7 +66,9 @@ fun ConnectionScreen(
     onGoBack: () -> Unit = {},
     onConnected: () -> Unit,
 ) {
-    var selectedTab by remember { mutableIntStateOf(1) } // default to Manual Entry
+    // QR leads: it is faster and carries the certificate fingerprint, which
+    // manual entry cannot.
+    var selectedTab by remember { mutableIntStateOf(0) }
 
     Column(
         modifier = Modifier
@@ -81,82 +77,72 @@ fun ConnectionScreen(
             .windowInsetsPadding(WindowInsets.systemBars)
             .verticalScroll(rememberScrollState()),
     ) {
-        // ── Back Bar ─────────────────────────────────────────────────────
         Row(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier
                 .fillMaxWidth()
                 .clickable { onGoBack() }
-                .padding(horizontal = 12.dp, vertical = 10.dp),
+                .padding(horizontal = 12.dp, vertical = 12.dp),
         ) {
             Icon(
                 Icons.AutoMirrored.Filled.ArrowBack,
-                contentDescription = "go back",
+                contentDescription = "Back",
                 tint = BridoTextSecondary,
                 modifier = Modifier.size(18.dp),
             )
-            Spacer(Modifier.width(6.dp))
+            Spacer(Modifier.width(8.dp))
             Text(
-                "go baCk",
-                color = BridoTextSecondary,
-                fontSize = 14.sp,
-                fontFamily = FontFamily.Serif,
-            )
-        }
-        // ── Tab Row ──────────────────────────────────────────────────────
-        TabRow(
-            selectedTabIndex = selectedTab,
-            containerColor = BridoSurface,
-            contentColor = BridoTextPrimary,
-            indicator = { tabPositions ->
-                SecondaryIndicator(
-                    Modifier.tabIndicatorOffset(tabPositions[selectedTab]),
-                    color = BridoAccent,
-                )
-            },
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp)
-                .clip(RoundedCornerShape(16.dp)),
-        ) {
-            Tab(
-                selected = selectedTab == 0,
-                onClick = { selectedTab = 0 },
-                text = { Text("Scan QR Code", fontSize = 13.sp) },
-                icon = {
-                    Icon(
-                        Icons.Default.QrCodeScanner,
-                        contentDescription = null,
-                        modifier = Modifier.size(20.dp),
-                    )
-                },
-            )
-            Tab(
-                selected = selectedTab == 1,
-                onClick = { selectedTab = 1 },
-                text = { Text("Manual Entry", fontSize = 13.sp) },
-                icon = {
-                    Icon(
-                        Icons.Default.Keyboard,
-                        contentDescription = null,
-                        modifier = Modifier.size(20.dp),
-                    )
-                },
+                "Connect",
+                color = BridoTextPrimary,
+                fontSize = 15.sp,
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.Bold,
             )
         }
 
-        Spacer(Modifier.height(8.dp))
+        // ── Tabs ─────────────────────────────────────────────────────────
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp),
+        ) {
+            TabPill("Scan QR", selectedTab == 0, Modifier.weight(1f)) { selectedTab = 0 }
+            TabPill("Manual", selectedTab == 1, Modifier.weight(1f)) { selectedTab = 1 }
+        }
+
+        Spacer(Modifier.height(4.dp))
 
         when (selectedTab) {
             0 -> QrScannerTab { data ->
-                // The QR may also carry the server's certificate fingerprint,
-                // which pins the connection before the first request.
                 viewModel.applyScannedData(data.ip, data.port, data.pin, data.fingerprint)
                 viewModel.connect(onConnected)
             }
             1 -> ManualEntryTab(viewModel, onConnected)
         }
     }
+}
+
+@Composable
+private fun TabPill(
+    label: String,
+    selected: Boolean,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
+    Text(
+        label,
+        color = if (selected) BridoOnAccent else BridoTextSecondary,
+        fontSize = 12.sp,
+        fontFamily = FontFamily.Monospace,
+        fontWeight = FontWeight.Bold,
+        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+        modifier = modifier
+            .clip(InstrumentShape)
+            .background(if (selected) BridoAccent else BridoSurface)
+            .clickable { onClick() }
+            .padding(vertical = 11.dp),
+    )
 }
 
 @Composable
@@ -170,243 +156,181 @@ private fun ManualEntryTab(
         viewModel.pin.isNotBlank() &&
         viewModel.serverPort in 1..65535
 
-    val fieldColors = OutlinedTextFieldDefaults.colors(
-        focusedTextColor = BridoTextPrimary,
-        unfocusedTextColor = BridoTextPrimary,
-        cursorColor = BridoAccent,
-        focusedBorderColor = BridoAccent,
-        unfocusedBorderColor = BridoSurfaceVariant,
-        focusedLabelColor = BridoAccent,
-        unfocusedLabelColor = BridoTextSecondary,
-    )
+    Column(modifier = Modifier.padding(horizontal = 14.dp)) {
 
-    Column(modifier = Modifier.padding(horizontal = 16.dp)) {
-        Text(
-            "Enter connection details manually:",
-            color = BridoTextPrimary,
-            fontWeight = FontWeight.SemiBold,
-            fontSize = 16.sp,
-        )
+        GroupLabel("Server")
 
-        Spacer(Modifier.height(16.dp))
-
-        // Server IP + port. The port is editable because the server's port is
-        // configurable — without this field a non-default port can only be
-        // paired by QR, and manual entry fails with a confusing timeout.
-        Row(modifier = Modifier.fillMaxWidth()) {
-            Column(modifier = Modifier.weight(2f)) {
-                Text("Server IP Address", color = BridoTextSecondary, fontSize = 12.sp)
-                Spacer(Modifier.height(4.dp))
-                OutlinedTextField(
-                    value = viewModel.serverIp,
-                    onValueChange = { viewModel.serverIp = it.trim() },
-                    placeholder = {
-                        Text("192.168.0.6", color = BridoTextSecondary.copy(alpha = 0.5f))
-                    },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(
-                        keyboardType = KeyboardType.Uri,
-                        imeAction = ImeAction.Next,
-                    ),
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = fieldColors,
-                )
-            }
-
-            Spacer(Modifier.width(12.dp))
-
-            Column(modifier = Modifier.weight(1f)) {
-                Text("Port", color = BridoTextSecondary, fontSize = 12.sp)
-                Spacer(Modifier.height(4.dp))
-                OutlinedTextField(
-                    value = viewModel.serverPort.toString(),
-                    onValueChange = { entered ->
-                        entered.filter { it.isDigit() }.take(5).toIntOrNull()
-                            ?.let { viewModel.serverPort = it }
-                            ?: run { if (entered.isEmpty()) viewModel.serverPort = 0 }
-                    },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(
-                        keyboardType = KeyboardType.Number,
-                        imeAction = ImeAction.Next,
-                    ),
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = fieldColors,
-                )
-            }
-        }
-
-        Spacer(Modifier.height(16.dp))
-
-        // PIN Code — numeric keypad, since the PIN is always six digits.
-        Text("PIN Code", color = BridoTextSecondary, fontSize = 12.sp)
-        Spacer(Modifier.height(4.dp))
-        OutlinedTextField(
-            value = viewModel.pin,
-            onValueChange = { entered -> viewModel.pin = entered.filter { it.isDigit() }.take(6) },
-            placeholder = { Text("••••••", color = BridoTextSecondary.copy(alpha = 0.5f)) },
-            singleLine = true,
-            visualTransformation = PasswordVisualTransformation(),
-            keyboardOptions = KeyboardOptions(
-                keyboardType = KeyboardType.NumberPassword,
-                imeAction = ImeAction.Done,
-            ),
-            keyboardActions = KeyboardActions(
-                onDone = {
-                    focusManager.clearFocus()
-                    if (canConnect) viewModel.connect(onConnected)
+        // Address and port belong together — one row keeps that relationship
+        // visible and stops the port feeling like an afterthought.
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            MonoField(
+                value = viewModel.serverIp,
+                onValueChange = { viewModel.serverIp = it.trim() },
+                placeholder = "192.168.0.5",
+                keyboardType = KeyboardType.Uri,
+                imeAction = ImeAction.Next,
+                modifier = Modifier.weight(2f),
+            )
+            MonoField(
+                value = if (viewModel.serverPort == 0) "" else viewModel.serverPort.toString(),
+                onValueChange = { entered ->
+                    val digits = entered.filter { it.isDigit() }.take(5)
+                    viewModel.serverPort = digits.toIntOrNull() ?: 0
                 },
-            ),
+                placeholder = "8080",
+                keyboardType = KeyboardType.Number,
+                imeAction = ImeAction.Next,
+                modifier = Modifier.weight(1f),
+            )
+        }
+
+        GroupLabel("Pairing PIN")
+
+        MonoField(
+            value = viewModel.pin,
+            onValueChange = { viewModel.pin = it.filter { c -> c.isDigit() }.take(6) },
+            placeholder = "000000",
+            keyboardType = KeyboardType.NumberPassword,
+            imeAction = ImeAction.Done,
+            masked = true,
+            letterSpacing = 6.sp,
+            onDone = {
+                focusManager.clearFocus()
+                if (canConnect) viewModel.connect(onConnected)
+            },
             modifier = Modifier.fillMaxWidth(),
-            colors = fieldColors,
         )
 
-        Spacer(Modifier.height(16.dp))
-
-        // Offer the saved session before asking for a PIN again.
-        if (viewModel.hasTrustedSession && !viewModel.isConnected) {
-            Button(
-                onClick = { viewModel.connectWithTrustedToken(onConnected) },
-                enabled = !viewModel.isConnecting,
-                modifier = Modifier.fillMaxWidth().height(50.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = BridoAccent),
-                shape = RoundedCornerShape(8.dp),
-            ) {
-                Text("Reconnect without PIN", color = Color.White, fontWeight = FontWeight.Bold)
-            }
-            Spacer(Modifier.height(8.dp))
+        // The error belongs beside the fields that caused it, not below the
+        // button the user has already stopped looking at.
+        viewModel.connectionError?.let { error ->
+            Spacer(Modifier.height(10.dp))
+            Text(
+                error,
+                color = BridoDanger,
+                fontSize = 12.5.sp,
+                lineHeight = 17.sp,
+            )
         }
 
-        // Always reachable whenever anything is pinned for this server —
-        // otherwise a legitimate server restart (new certificate) leaves the
-        // phone stuck with no way to clear the old pin.
-        if ((viewModel.hasTrustedSession || viewModel.hasPinnedCertificate) &&
-            !viewModel.isConnected
-        ) {
-            TextButton(onClick = { viewModel.forgetThisDevice() }) {
-                Text("Forget this device", color = BridoTextSecondary, fontSize = 13.sp)
-            }
-            Spacer(Modifier.height(8.dp))
-        }
+        Spacer(Modifier.height(18.dp))
 
-        // Trust device checkbox
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text("Trust this device", color = BridoTextPrimary, fontWeight = FontWeight.Medium)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
                 Text(
-                    "Save a session so the PIN can be skipped next time",
+                    "Stay paired with this PC",
+                    color = BridoTextPrimary,
+                    fontSize = 13.sp,
+                    fontFamily = FontFamily.Monospace,
+                )
+                Text(
+                    "Skip the PIN next time",
                     color = BridoTextSecondary,
                     fontSize = 12.sp,
                 )
             }
-            IconButton(onClick = { viewModel.trustDevice = !viewModel.trustDevice }) {
-                Icon(
-                    if (viewModel.trustDevice) Icons.Default.CheckBox
-                    else Icons.Default.CheckBoxOutlineBlank,
-                    contentDescription = "Trust device",
-                    tint = if (viewModel.trustDevice) BridoAccent else BridoTextSecondary,
-                )
-            }
+            Switch(
+                checked = viewModel.trustDevice,
+                onCheckedChange = { viewModel.trustDevice = it },
+                colors = SwitchDefaults.colors(
+                    checkedThumbColor = BridoOnAccent,
+                    checkedTrackColor = BridoAccent,
+                    uncheckedThumbColor = BridoTextSecondary,
+                    uncheckedTrackColor = BridoSurface,
+                    uncheckedBorderColor = BridoLine,
+                ),
+            )
         }
 
-        Spacer(Modifier.height(24.dp))
+        Spacer(Modifier.height(16.dp))
 
-        // Connect button
-        Button(
+        PrimaryAction(
+            label = "Connect",
+            busy = viewModel.isConnecting,
+            enabled = canConnect,
             onClick = {
                 focusManager.clearFocus()
                 viewModel.connect(onConnected)
             },
-            enabled = canConnect,
-            modifier = Modifier.fillMaxWidth().height(50.dp),
-            colors = ButtonDefaults.buttonColors(containerColor = BridoSurfaceVariant),
-            shape = RoundedCornerShape(8.dp),
-        ) {
-            if (viewModel.isConnecting) {
-                CircularProgressIndicator(
-                    color = BridoAccent,
-                    modifier = Modifier.size(24.dp),
-                    strokeWidth = 2.dp,
-                )
-            } else {
-                Text("Connect", color = BridoTextPrimary, fontWeight = FontWeight.Bold)
-            }
-        }
+        )
 
-        // Error message
-        viewModel.connectionError?.let { error ->
-            Spacer(Modifier.height(8.dp))
-            Text(error, color = Color.Red, fontSize = 13.sp)
-        }
-
-        Spacer(Modifier.height(16.dp))
-
-        // ── Info Card ────────────────────────────────────────────────────
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = BridoSurface),
-            shape = RoundedCornerShape(12.dp),
-        ) {
-            Row(
-                modifier = Modifier.padding(16.dp),
-                verticalAlignment = Alignment.Top,
-            ) {
-                Icon(
-                    Icons.Default.Info,
-                    contentDescription = null,
-                    tint = BridoTextSecondary,
-                    modifier = Modifier.size(20.dp),
-                )
-                Spacer(Modifier.width(12.dp))
-                Column {
-                    Text(
-                        "Connection Info:",
-                        color = BridoTextPrimary,
-                        fontWeight = FontWeight.SemiBold,
-                        fontSize = 14.sp,
-                    )
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        "Find the IP address and PIN on your PC's Brido Server window.",
-                        color = BridoTextSecondary,
-                        fontSize = 13.sp,
-                    )
-                }
-            }
-        }
-
-        Spacer(Modifier.height(16.dp))
-
-        // ── sTReAmScrEEn Button ──────────────────────────────────────────
-        Button(
-            onClick = {
-                if (viewModel.isConnected) {
-                    onConnected()
-                } else if (!viewModel.isConnecting) {
-                    viewModel.connectionError = "Not connected. Enter IP and PIN above, then tap Connect."
-                }
-            },
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 0.dp)
-                .height(50.dp),
-            colors = ButtonDefaults.buttonColors(
-                containerColor = if (viewModel.isConnected) BridoSurfaceVariant else BridoSurfaceVariant.copy(alpha = 0.5f),
-            ),
-            shape = RoundedCornerShape(8.dp),
-        ) {
-            Text(
-                "sTReAmScrEEn",
-                color = if (viewModel.isConnected) BridoTextPrimary else BridoTextSecondary,
-                fontWeight = FontWeight.Bold,
-                fontSize = 18.sp,
-                fontFamily = FontFamily.Serif,
+        if (viewModel.hasTrustedSession && !viewModel.isConnected) {
+            Spacer(Modifier.height(10.dp))
+            SecondaryAction(
+                label = "Reconnect without PIN",
+                tint = BridoAccent,
+                onClick = { viewModel.connectWithTrustedToken(onConnected) },
+                modifier = Modifier.fillMaxWidth(),
             )
         }
 
+        // Always reachable while anything is pinned — a legitimate server
+        // restart otherwise leaves the phone stuck on a stale certificate.
+        if ((viewModel.hasTrustedSession || viewModel.hasPinnedCertificate) &&
+            !viewModel.isConnected
+        ) {
+            Spacer(Modifier.height(8.dp))
+            SecondaryAction(
+                label = "Forget this PC",
+                onClick = { viewModel.forgetThisDevice() },
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+
+        Spacer(Modifier.height(18.dp))
+
+        NotePanel("Find the address and PIN in the Brido window on your PC.")
+
         Spacer(Modifier.height(24.dp))
     }
+}
+
+/** Monospace text field — every value on this screen is data, not prose. */
+@Composable
+private fun MonoField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    placeholder: String,
+    keyboardType: KeyboardType,
+    imeAction: ImeAction,
+    modifier: Modifier = Modifier,
+    masked: Boolean = false,
+    letterSpacing: androidx.compose.ui.unit.TextUnit = 0.sp,
+    onDone: (() -> Unit)? = null,
+) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = onValueChange,
+        placeholder = {
+            Text(
+                placeholder,
+                color = BridoTextSecondary.copy(alpha = 0.55f),
+                fontFamily = FontFamily.Monospace,
+                fontSize = 14.sp,
+                letterSpacing = letterSpacing,
+            )
+        },
+        singleLine = true,
+        shape = InstrumentShape,
+        visualTransformation = if (masked) PasswordVisualTransformation() else
+            androidx.compose.ui.text.input.VisualTransformation.None,
+        textStyle = TextStyle(
+            fontFamily = FontFamily.Monospace,
+            fontSize = 14.sp,
+            letterSpacing = letterSpacing,
+            color = BridoTextPrimary,
+        ),
+        keyboardOptions = KeyboardOptions(keyboardType = keyboardType, imeAction = imeAction),
+        keyboardActions = KeyboardActions(onDone = { onDone?.invoke() }),
+        colors = OutlinedTextFieldDefaults.colors(
+            focusedTextColor = BridoTextPrimary,
+            unfocusedTextColor = BridoTextPrimary,
+            cursorColor = BridoAccent,
+            focusedBorderColor = BridoAccent,
+            unfocusedBorderColor = BridoLine,
+            focusedContainerColor = Color.Transparent,
+            unfocusedContainerColor = Color.Transparent,
+        ),
+        modifier = modifier,
+    )
 }
