@@ -1,111 +1,147 @@
 <div align="center">
 
-<img src="brido.png" alt="Brido Logo" width="100"/>
+<img src="brido.png" alt="Brido" width="96"/>
 
 # brido
 
-Stream your laptop screen to your phone and run on-demand AI analysis.
+### Your laptop screen, on your phone — with an AI that answers what's on it.
 
-[![Rust](https://img.shields.io/badge/server-Rust-orange?style=flat-square&logo=rust)](brido_server/)
-[![Android](https://img.shields.io/badge/app-Kotlin%20%2F%20Compose-green?style=flat-square&logo=android)](brido_app/)
-[![License](https://img.shields.io/badge/license-Apache%202.0-blue?style=flat-square)](#)
+[![server](https://img.shields.io/badge/server-Rust-orange?style=flat-square&logo=rust)](brido_server/)
+[![app](https://img.shields.io/badge/app-Kotlin%20%2F%20Compose-green?style=flat-square&logo=android)](brido_app/)
+[![license](https://img.shields.io/badge/license-Apache%202.0-blue?style=flat-square)](#license)
+
+<img src="docs/screenshots/hero.png" alt="Brido running: desktop overlay on the left, phone mirroring the screen on the right" width="100%"/>
 
 </div>
 
 ---
 
-## Overview
+## What it does
 
-Brido is a two-part system:
+Brido puts your laptop screen on your phone, live. Then, whenever you want, it
+asks an AI about whatever is on that screen — and answers appear on the phone.
 
-- A Windows desktop server written in Rust that captures the laptop screen and streams frames over HTTPS/WSS.
-- An Android app written in Kotlin/Compose that receives the stream and requests AI analysis for the latest frame.
-- AI analysis is provider-based and configured with environment variables (Gemini, OpenRouter, or Ollama for local models).
+It's two small pieces that pair in about ten seconds:
 
----
+- A **desktop app** that shares your screen and stays out of the way.
+- A **phone app** that shows the screen and does the asking.
 
-## Repository Layout
-
-| Path | Description |
-|------|-------------|
-| `brido_server/` | Rust server, HTTPS/WSS APIs, desktop GUI, system tray integration |
-| `brido_app/` | Android client app (Jetpack Compose) |
-| `ARCHITECTURE.md` | Cross-project architecture notes |
-| `API.md` | API notes and request/response reference |
-| `SETUP.md` | Setup instructions |
-| `TROUBLESHOOTING.md` | Common issues and fixes |
+No cloud service in between. Your laptop talks to your phone over your own
+Wi‑Fi, and nothing leaves your network except the AI request itself.
 
 ---
 
-## Quick Start
+## Why people use it
 
-### 1. Start the server
+**Read your laptop from across the room.** Cooking, on the treadmill, wiring
+something under a desk — the screen comes with you.
+
+**Ask about what you're looking at.** A stack trace, a form in a language you
+don't read, a chart, an error dialog. Tap **Analyse screen** and get a plain
+answer.
+
+**Ask about anything else, too.** The input box is a normal chatbot. Questions
+don't have to relate to the screen at all.
+
+**Type on your PC from the couch.** Flip the toggle from **AI** to **PC** and
+your phone becomes a keyboard — text lands wherever the cursor is, arrow keys
+and backspace included.
+
+---
+
+## Getting started
+
+### 1 · Start the desktop app
 
 ```bash
 cd brido_server
 cargo run --release
 ```
 
-The server GUI opens and shows QR code, IP, and PIN.
-On first run, Brido automatically creates `.env.local` beside the running executable and opens a setup prompt to choose provider + API key.
+A small panel appears. On first run it asks which AI provider to use — Gemini,
+OpenRouter, or Ollama if you'd rather run a model on your own machine.
 
-If the executable directory is read-only (for example, Program Files), Brido falls back to `%APPDATA%/Brido/.env.local`.
+### 2 · Pair your phone
 
-### 2. Run the Android app
+Click **Pair**. Scan the QR code with the app, or type the address and PIN.
 
-Open `brido_app/` in Android Studio and run on a physical device connected to the same Wi-Fi.
+<div align="center">
+<img src="docs/screenshots/pair.png" alt="Pairing panel with QR code, PIN and connected device count" width="320"/>
+</div>
 
-### 3. Pair and analyse
+The QR carries a fingerprint of your laptop's certificate, so the phone knows
+it's talking to *your* machine and not something pretending to be it. Tick
+**Stay paired** and you can skip the PIN next time.
 
-- Scan QR (or enter IP and PIN manually) in the app.
-- Press `anAlyse` on the phone to analyze the current frame.
+### 3 · That's it
 
-### 4. Release downloads
-
-GitHub Releases publish these artifacts on every `v*` tag:
-
-- `brido-server-<tag>.exe`
-- `brido-server-<tag>-bundle.zip` (exe + `.env.local.template` + server README)
-- `brido-android-debug-<tag>.apk`
-- `brido-android-release-<tag>.apk` (required for tagged releases)
+Your screen is on your phone.
 
 ---
 
-## Desktop Tray Behavior
-
-While the server is running:
-
-- Clicking the GUI `minimize` button hides the window to system tray.
-- Clicking the OS close button (`X`) also hides to tray instead of exiting.
-- Tray menu contains `Open` and `Quit`.
-- Double-clicking the tray icon restores the window.
-
----
-
-## Documentation
-
-- [Server README](brido_server/README.md)
-- [Android App README](brido_app/README.md)
-- [Architecture](ARCHITECTURE.md)
-- [API](API.md)
-- [Setup](SETUP.md)
-- [Troubleshooting](TROUBLESHOOTING.md)
-
----
-
-## Troubleshooting
-
-| Problem | What to check |
-|---------|---------------|
-| App cannot connect | Laptop and phone are on same Wi-Fi, firewall allows server port (default 8080) |
-| PIN rejected | PIN changes on server restart; use the PIN currently shown in GUI |
-| Analyse fails | Verify at least one AI provider API key is configured in `.env.local` |
-| Window seems gone | Press the toggle hotkey (same key used to hide) to bring it back; also check system tray and use `Open` |
-
----
+## A look around
 
 <div align="center">
 
-Built with Rust and Kotlin.
+| Connect | Live screen | An answer |
+|:---:|:---:|:---:|
+| <img src="docs/screenshots/connect.png" width="220"/> | <img src="docs/screenshots/stream.png" width="220"/> | <img src="docs/screenshots/answer.png" width="220"/> |
+| Scan a code or type the address | Your laptop, mirrored live | Ask anything, on-screen or not |
 
 </div>
+
+<div align="center">
+
+| Phone settings | Desktop panel |
+|:---:|:---:|
+| <img src="docs/screenshots/settings.png" width="240"/> | <img src="docs/screenshots/overlay.png" width="300"/> |
+| Change provider, model and keys from the phone — they sync both ways | Answers, copyable, out of the way |
+
+</div>
+
+---
+
+## Your keys stay yours
+
+Settings sync from your desktop to your phone the moment you connect, so you can
+switch model or paste a key from either side. On the phone they live **in memory
+only** — never written to storage, and wiped the second you disconnect, even for
+a device you've marked as trusted.
+
+Pairing is protected by a PIN that can't be brute-forced, sessions expire on
+their own, and the connection is pinned to your laptop's certificate. Your API
+keys are used by your own machine, and go nowhere else.
+
+---
+
+## Handy to know
+
+- **Hotkeys** — `Ctrl+R` capture and analyse · `` Ctrl+` `` hide the panel ·
+  `Ctrl+.` type straight into the box. All rebindable in Settings.
+- **Bring your own model** — Gemini, OpenRouter, or Ollama running locally.
+- **Runs quietly** — the desktop panel floats above your work and can hide
+  itself from screen capture and screen sharing.
+- **Voice input is in development** — the groundwork is in, but it isn't ready
+  yet, so it's hidden for now.
+
+---
+
+## Under the hood
+
+| Path | What's inside |
+|:---|:---|
+| `brido_server/` | Desktop app and server — Rust, HTTPS/WSS, screen capture |
+| `brido_app/` | Phone app — Kotlin and Jetpack Compose |
+| [`ARCHITECTURE.md`](ARCHITECTURE.md) | How the pieces fit together |
+| [`API.md`](API.md) | Endpoints and payloads |
+| [`SETUP.md`](SETUP.md) | Detailed setup |
+| [`TROUBLESHOOTING.md`](TROUBLESHOOTING.md) | When something won't connect |
+
+**Requirements** — Windows for the desktop app, Android 7.0 or newer for the
+phone, and both on the same Wi‑Fi.
+
+---
+
+## License
+
+Apache 2.0. See [LICENSE](LICENSE).
