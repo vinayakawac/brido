@@ -8,6 +8,7 @@ use axum::{
 };
 use futures_util::{SinkExt, StreamExt};
 use serde::Deserialize;
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use crate::server::AppState;
@@ -22,16 +23,18 @@ pub async fn ws_handler(
     Query(query): Query<StreamQuery>,
     State(state): State<Arc<AppState>>,
 ) -> Response {
-    let tokens = state.active_tokens.read().await;
-    if !tokens.contains(&query.token) {
+    if !state.auth.verify(&query.token).await {
         return StatusCode::UNAUTHORIZED.into_response();
     }
-    drop(tokens);
 
     ws.on_upgrade(move |socket| handle_stream(socket, state))
 }
 
 async fn handle_stream(socket: WebSocket, state: Arc<AppState>) {
+    // The device count tracks live streams rather than tokens issued, so a
+    // dropped connection or repeated pairing cannot inflate it.
+    state.connected_count.fetch_add(1, Ordering::SeqCst);
+
     let mut rx = state.frame_tx.subscribe();
     let (mut sender, mut receiver) = socket.split();
 
@@ -64,4 +67,11 @@ async fn handle_stream(socket: WebSocket, state: Arc<AppState>) {
     }
 
     recv_task.abort();
+
+    // Saturating so an unexpected double-exit cannot wrap the counter.
+    let _ = state
+        .connected_count
+        .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| {
+            Some(n.saturating_sub(1))
+        });
 }

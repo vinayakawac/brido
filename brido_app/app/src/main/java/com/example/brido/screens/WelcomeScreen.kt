@@ -6,6 +6,8 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -20,6 +22,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.brido.ui.theme.BridoAccent
 import com.example.brido.ui.theme.BridoDark
 import com.example.brido.ui.theme.BridoTextPrimary
 import com.example.brido.ui.theme.BridoTextSecondary
@@ -93,13 +96,22 @@ fun WelcomeScreen(onContinue: () -> Unit) {
                 fontFamily = FontFamily.Serif,
             )
 
-            // "brido" — app name, largest and bold
+            // "brido" — app name, largest and bold. The one place the accent
+            // is used as display type; everywhere else it marks live state.
             Text(
                 text = "brido",
-                color = BridoTextPrimary,
+                color = BridoAccent,
                 fontSize = 96.sp,
                 fontWeight = FontWeight.Black,
                 fontFamily = FontFamily.Serif,
+            )
+
+            Spacer(Modifier.height(14.dp))
+
+            Text(
+                text = "Your laptop screen, on your phone.",
+                color = BridoTextSecondary,
+                fontSize = 14.sp,
             )
         }
     }

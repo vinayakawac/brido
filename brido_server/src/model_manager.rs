@@ -3,7 +3,16 @@ use serde::{Deserialize, Serialize};
 
 use crate::config::Config;
 
-const ANALYZE_PROMPT: &str = "Analyze this screenshot and follow this strict priority order:\n\n1) QUESTION ANSWERING (highest priority)\n- If the screen contains direct question(s) where answers can be provided from visible context, answer them first.\n- Use this format:\nQuestion: <short restatement>\nAnswer: <best direct answer>\nWhy: <1-3 short lines>\n\n2) QUIZ / MCQ\n- If it is a multiple-choice quiz, answer using:\nAnswer: <LETTER>. <FULL_OPTION_TEXT>\n\nExplanation:\n<2-4 short lines>\n\n3) CODING PROBLEM\n- If it is a coding task, return exactly one runnable code block only and no extra text.\n\n4) SCREEN DESCRIPTION (fallback only)\n- Only when none of the above apply, briefly describe what the screen is showing in 2-4 lines.\n\nGlobal rules:\n- Pick exactly one mode from the priority list.\n- Prefer helping with visible question content over generic description.\n- If text is not readable, state that briefly and ask for a clearer frame.\n- Keep output concise and actionable.";
+const ANALYZE_PROMPT: &str = "Analyze this screenshot and follow this strict priority order:\n\n1) QUESTION ANSWERING (highest priority)\n- If the screen contains any question, answer it. Use your own knowledge to answer even when the answer is not written on the screen — do not say the screenshot lacks the information.\n- Use this format:\nQuestion: <short restatement>\nAnswer: <best direct answer>\nWhy: <1-3 short lines>\n\n2) QUIZ / MCQ\n- If it is a multiple-choice quiz, answer using:\nAnswer: <LETTER>. <FULL_OPTION_TEXT>\n\nExplanation:\n<2-4 short lines>\n\n3) CODING PROBLEM\n- If it is a coding task, return exactly one runnable code block only and no extra text.\n\n4) SCREEN DESCRIPTION (fallback only)\n- Only when none of the above apply, briefly describe what the screen is showing in 2-4 lines.\n\nGlobal rules:\n- Pick exactly one mode from the priority list.\n- Prefer answering questions over generic description, using outside knowledge when needed.\n- If text is not readable, state that briefly and ask for a clearer frame.\n- Keep output concise and actionable.";
+/// Prompt used when the user typed a question.
+///
+/// Unlike [`ANALYZE_PROMPT`], this does not confine the answer to what is
+/// visible on screen — the model answers the question directly from its own
+/// knowledge (like a normal chatbot) and treats the screenshot as optional
+/// context. So "who is the current PM of India?" gets answered even though the
+/// screen has nothing to do with it.
+const CHAT_PROMPT: &str = "You are a helpful assistant. Answer the user's question directly and completely using your own knowledge. A screenshot of the user's screen is attached as optional context: use it only if the question refers to what is on screen, otherwise ignore it. Do not say the screenshot lacks the information — just answer the question. Format:\nAnswer: <direct answer>\nWhy: <1-3 short supporting lines, only if useful>\nKeep it concise. For a coding request, return exactly one runnable code block.";
+
 const MAX_ANALYZE_IMAGE_BASE64_BYTES: usize = 5 * 1024 * 1024;
 
 #[derive(Clone, Debug, Serialize)]
@@ -1120,9 +1129,12 @@ fn push_provider(
 
 fn merge_prompt(custom_prompt: Option<&str>) -> String {
     match custom_prompt {
-        Some(extra) if !extra.trim().is_empty() => {
-            format!("{}\n\nExtra instruction:\n{}", ANALYZE_PROMPT, extra)
+        // A typed question is answered like a chatbot, from the model's own
+        // knowledge, with the screenshot as optional context.
+        Some(question) if !question.trim().is_empty() => {
+            format!("{}\n\nUser's question:\n{}", CHAT_PROMPT, question.trim())
         }
+        // No question: fall back to screen analysis (the hotkey/Analyse path).
         _ => ANALYZE_PROMPT.to_string(),
     }
 }

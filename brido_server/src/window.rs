@@ -3,23 +3,26 @@
 use eframe::egui;
 use egui::{
     Align, Color32, CornerRadius, FontFamily, FontId, Layout, Margin, RichText, ScrollArea,
-    Stroke, StrokeKind, Vec2,
+    Stroke, Vec2,
 };
 use std::sync::mpsc;
 
 use super::hotkey::OverlayEvent;
 
-// ── Colours (matching Brido server palette) ─────────────────────────────────
-const BG: Color32 = Color32::from_rgb(18, 18, 18);
-const SURFACE: Color32 = Color32::from_rgb(30, 30, 30);
-const SURFACE_HOVER: Color32 = Color32::from_rgb(42, 42, 42);
-const ACCENT: Color32 = Color32::from_rgb(0, 230, 118);
-const TEXT_PRIMARY: Color32 = Color32::from_rgb(240, 240, 240);
-const TEXT_SECONDARY: Color32 = Color32::from_rgb(160, 160, 160);
-const TEXT_DIM: Color32 = Color32::from_rgb(100, 100, 100);
-const RED: Color32 = Color32::from_rgb(239, 83, 80);
-const YELLOW: Color32 = Color32::from_rgb(255, 202, 40);
-const CODE_BG: Color32 = Color32::from_rgb(40, 40, 40);
+// ── Palette: "Instrument" direction ─────────────────────────────────────────
+// Near-black ground with a single signal-green accent, shared with the app.
+// The accent is reserved for live state, answers and the primary action.
+const BG: Color32 = Color32::from_rgb(10, 11, 13);
+const SURFACE: Color32 = Color32::from_rgb(20, 22, 26);
+const SURFACE_HOVER: Color32 = Color32::from_rgb(28, 31, 37);
+const LINE: Color32 = Color32::from_rgb(38, 43, 51);
+const ACCENT: Color32 = Color32::from_rgb(94, 240, 138);
+const TEXT_PRIMARY: Color32 = Color32::from_rgb(230, 233, 238);
+const TEXT_SECONDARY: Color32 = Color32::from_rgb(154, 163, 175);
+const TEXT_DIM: Color32 = Color32::from_rgb(121, 130, 143);
+const RED: Color32 = Color32::from_rgb(255, 107, 107);
+const YELLOW: Color32 = Color32::from_rgb(255, 204, 77);
+const CODE_BG: Color32 = Color32::from_rgb(28, 31, 37);
 
 /// Messages sent from async analysis tasks back to the UI.
 pub enum AnalysisResult {
@@ -102,6 +105,17 @@ pub struct OverlayApp {
     connected_count: std::sync::Arc<std::sync::atomic::AtomicUsize>,
     show_qr: bool,
     qr_texture: Option<egui::TextureHandle>,
+    /// SHA-256 of the server's TLS certificate, published once the server is up.
+    cert_fingerprint: std::sync::Arc<std::sync::RwLock<Option<String>>>,
+    /// Config shared with the HTTP server, so both paths use the same keys.
+    shared_config: std::sync::Arc<std::sync::RwLock<brido_server::config::Config>>,
+    /// Incremented by the server when a paired device edits settings.
+    settings_version: std::sync::Arc<std::sync::atomic::AtomicU64>,
+    /// Last version this window has applied, to detect remote edits.
+    applied_settings_version: u64,
+    /// Payload the current QR texture was built from, so it is regenerated
+    /// when the fingerprint arrives rather than being cached forever.
+    qr_payload: String,
     voice_mode: bool,
     voice_copilot_task: Option<tokio::task::JoinHandle<()>>,
     audio_stop_tx: Option<std::sync::mpsc::Sender<()>>,
@@ -120,6 +134,9 @@ impl OverlayApp {
         port: u16,
         server_ready: std::sync::Arc<std::sync::atomic::AtomicBool>,
         connected_count: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+        cert_fingerprint: std::sync::Arc<std::sync::RwLock<Option<String>>>,
+        shared_config: std::sync::Arc<std::sync::RwLock<brido_server::config::Config>>,
+        settings_version: std::sync::Arc<std::sync::atomic::AtomicU64>,
     ) -> Self {
         let (result_tx, result_rx) = mpsc::channel();
         Self {
@@ -179,6 +196,11 @@ impl OverlayApp {
             connected_count,
             show_qr: false,
             qr_texture: None,
+            cert_fingerprint,
+            shared_config,
+            settings_version,
+            applied_settings_version: 0,
+            qr_payload: String::new(),
             voice_mode: false,
             voice_copilot_task: None,
             audio_stop_tx: None,
@@ -325,6 +347,7 @@ impl OverlayApp {
                     ) {
                         tracing::error!("Failed to save stealth mode toggle: {}", e);
                     }
+                    self.publish_config();
                     ctx.request_repaint();
                 }
 
@@ -438,6 +461,77 @@ impl OverlayApp {
         }
     }
 
+    /// Publishes this window's config to the HTTP server.
+    ///
+    /// Without this the server keeps serving requests with whatever keys
+    /// existed at launch, which is why phone analysis failed with stale
+    /// credentials while the desktop's own capture worked.
+    fn publish_config(&mut self) {
+        if let Ok(mut shared) = self.shared_config.write() {
+            *shared = self.config.clone();
+        }
+        // Count our own write so we don't immediately treat it as a remote edit.
+        self.applied_settings_version = self
+            .settings_version
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+            + 1;
+    }
+
+    /// Pulls in settings changed by a paired device.
+    fn sync_remote_settings(&mut self) {
+        let current = self.settings_version.load(std::sync::atomic::Ordering::SeqCst);
+        if current == self.applied_settings_version {
+            return;
+        }
+        self.applied_settings_version = current;
+
+        let Ok(shared) = self.shared_config.read() else {
+            return;
+        };
+        self.config = shared.clone();
+        drop(shared);
+
+        // Refresh the settings form so the desktop shows what the phone sent.
+        self.settings_gemini_key = self.config.gemini_api_key.clone();
+        self.settings_openrouter_key = self.config.openrouter_api_key.clone();
+        self.settings_ollama_key = self.config.ollama_api_key.clone();
+        self.settings_ollama_base_url = self.config.ollama_base_url.clone();
+        self.settings_deepgram_key = self.config.deepgram_api_key.clone();
+        self.settings_resume = self.config.resume_text.clone();
+        self.settings_jd = self.config.job_description_text.clone();
+        self.settings_active_provider = self.config.active_provider.clone();
+        self.settings_asr_model = self.config.asr_model.clone();
+        self.settings_models.insert(
+            brido_server::config::ProviderKind::Gemini,
+            self.config.gemini_model.clone(),
+        );
+        self.settings_models.insert(
+            brido_server::config::ProviderKind::OpenRouter,
+            self.config.openrouter_model.clone(),
+        );
+        self.settings_models.insert(
+            brido_server::config::ProviderKind::Ollama,
+            self.config.ollama_model.clone(),
+        );
+        self.status_text = "Settings synced from phone".to_string();
+    }
+
+    /// Issues a fresh pairing PIN.
+    ///
+    /// Useful when a PIN has been shown to someone who should no longer be able
+    /// to pair. Already-issued tokens keep working — revoke those by forgetting
+    /// the device on the phone.
+    fn regenerate_pin(&mut self) {
+        use rand::Rng;
+        let pin = format!("{:06}", rand::thread_rng().gen_range(0..1_000_000u32));
+        self.pin = pin.clone();
+        self.config.pin = pin;
+        self.publish_config();
+        // Force the QR to be rebuilt with the new payload.
+        self.qr_payload.clear();
+        self.status_text = "New PIN issued".to_string();
+    }
+
     /// Apply stealth + initial positioning on the first frame.
     fn apply_first_frame_setup(&mut self, ctx: &egui::Context) {
         if self.stealth_applied {
@@ -459,18 +553,15 @@ impl OverlayApp {
     fn render_settings(&mut self, ui: &mut egui::Ui) {
         egui::Frame::new()
             .fill(SURFACE)
-            .corner_radius(CornerRadius::same(8))
+            .corner_radius(CornerRadius::same(6))
             .inner_margin(Margin::same(12))
             .show(ui, |ui| {
+                // Fills the panel rather than a fixed 400px, so the form uses
+                // whatever height the window actually has.
                 egui::ScrollArea::vertical()
-                    .max_height(400.0)
-                    .auto_shrink([false, true])
+                    .auto_shrink([false, false])
                     .show(ui, |ui| {
-                        ui.heading(RichText::new("Settings").color(TEXT_PRIMARY));
-                        ui.add_space(8.0);
-                
-                ui.label(RichText::new("Active AI Settings").color(TEXT_SECONDARY));
-                ui.add_space(4.0);
+                        group_label(ui, "Provider");
 
                 let mut current_kind = brido_server::config::ProviderKind::from_label(&self.settings_active_provider).unwrap_or(brido_server::config::ProviderKind::Gemini);
                 
@@ -545,9 +636,7 @@ impl OverlayApp {
 
                     });
 
-                ui.add_space(12.0);
-                ui.label(RichText::new("API Keys").color(TEXT_SECONDARY));
-                ui.add_space(4.0);
+                group_label(ui, "Credentials");
 
                 egui::Grid::new("settings_api_grid")
                     .num_columns(2)
@@ -575,21 +664,39 @@ impl OverlayApp {
                         ui.add(egui::TextEdit::singleline(&mut self.settings_deepgram_key).password(true));
                         ui.end_row();
 
-                        ui.label(RichText::new("Resume:").color(TEXT_PRIMARY));
-                        ui.add(egui::TextEdit::multiline(&mut self.settings_resume).desired_rows(3));
-                        ui.end_row();
-
-                        ui.label(RichText::new("Job Description:").color(TEXT_PRIMARY));
-                        ui.add(egui::TextEdit::multiline(&mut self.settings_jd).desired_rows(3));
-                        ui.end_row();
                     });
 
-                ui.add_space(12.0);
-                ui.checkbox(&mut self.settings_strict_stealth_mode, "Strict (Stealth) Mode");
+                group_label(ui, "Context");
+                ui.label(RichText::new("Résumé").color(TEXT_SECONDARY).size(11.0));
+                ui.add(
+                    egui::TextEdit::multiline(&mut self.settings_resume)
+                        .desired_rows(3)
+                        .desired_width(f32::INFINITY),
+                );
+                ui.add_space(6.0);
+                ui.label(
+                    RichText::new("Job description").color(TEXT_SECONDARY).size(11.0),
+                );
+                ui.add(
+                    egui::TextEdit::multiline(&mut self.settings_jd)
+                        .desired_rows(3)
+                        .desired_width(f32::INFINITY),
+                );
 
-                ui.add_space(12.0);
-                ui.label(RichText::new("Hotkeys").color(TEXT_SECONDARY));
-                ui.add_space(4.0);
+                group_label(ui, "Privacy");
+                ui.checkbox(
+                    &mut self.settings_strict_stealth_mode,
+                    "Strict stealth mode",
+                );
+                ui.label(
+                    RichText::new(
+                        "Hides this window from screen capture and screen sharing.",
+                    )
+                    .color(TEXT_DIM)
+                    .size(10.0),
+                );
+
+                group_label(ui, "Hotkeys");
                 
                 egui::Grid::new("settings_hotkey_grid")
                     .num_columns(2)
@@ -606,6 +713,13 @@ impl OverlayApp {
                         ui.horizontal(|ui| {
                             ui.label(RichText::new("Ctrl +").color(TEXT_DIM));
                             ui.add(egui::TextEdit::singleline(&mut self.settings_hotkey_toggle).desired_width(100.0));
+                        });
+                        ui.end_row();
+
+                        ui.label(RichText::new("Settings:").color(TEXT_PRIMARY));
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new("Ctrl +").color(TEXT_DIM));
+                            ui.add(egui::TextEdit::singleline(&mut self.settings_hotkey_settings).desired_width(100.0));
                         });
                         ui.end_row();
 
@@ -626,28 +740,22 @@ impl OverlayApp {
                 ui.add_space(16.0);
                 
                 ui.horizontal(|ui| {
-                    let btn_rect = ui.allocate_exact_size(Vec2::new(100.0, 28.0), egui::Sense::click());
-                    let fill = if btn_rect.1.hovered() { SURFACE_HOVER } else { BG };
-                    ui.painter().rect(
-                        btn_rect.0,
-                        CornerRadius::same(6),
-                        fill,
-                        Stroke::new(1.0, ACCENT.linear_multiply(0.4)),
-                        StrokeKind::Outside,
+                    // Real buttons: focusable, keyboard-navigable, and they
+                    // show a hand cursor. The painted rectangles did none of
+                    // that.
+                    let save = ui.add(
+                        egui::Button::new(
+                            RichText::new("Save & apply").size(12.0).color(BG).strong(),
+                        )
+                        .fill(ACCENT)
+                        .corner_radius(CornerRadius::same(6))
+                        .min_size(Vec2::new(112.0, 30.0)),
                     );
-                    ui.painter().text(
-                        btn_rect.0.center(),
-                        egui::Align2::CENTER_CENTER,
-                        "Save & Apply",
-                        FontId::new(12.0, FontFamily::Proportional),
-                        ACCENT,
-                    );
-                    
-                    if btn_rect.1.clicked() {
+
+                    if save.clicked() {
                         let cap_suffix = self.settings_hotkey_capture.trim().to_uppercase();
                         let tog_suffix = self.settings_hotkey_toggle.trim().to_uppercase();
                         
-                        // We also need to get settings_hotkey_settings to uppercase but since it isn't shown in UI currently we just use it
                         let set_suffix = self.settings_hotkey_settings.trim().to_uppercase();
 
                         if !is_valid_hotkey_suffix(&cap_suffix) {
@@ -741,6 +849,10 @@ impl OverlayApp {
                                 );
                                 self.hotkey_handle = Some(new_handle);
                                 
+                                // Push the new keys to the HTTP server so the
+                                // phone uses them on its very next request.
+                                self.publish_config();
+
                                 self.show_settings = false;
                                 self.error_text = None;
                                 self.status_text = "Settings saved & applied".to_string();
@@ -750,24 +862,17 @@ impl OverlayApp {
 
                     ui.add_space(8.0);
 
-                    let cancel_rect = ui.allocate_exact_size(Vec2::new(70.0, 28.0), egui::Sense::click());
-                    let fill_cancel = if cancel_rect.1.hovered() { SURFACE_HOVER } else { BG };
-                    ui.painter().rect(
-                        cancel_rect.0,
-                        CornerRadius::same(6),
-                        fill_cancel,
-                        Stroke::new(1.0, TEXT_DIM.linear_multiply(0.4)),
-                        StrokeKind::Outside,
+                    let cancel = ui.add(
+                        egui::Button::new(
+                            RichText::new("Cancel").size(12.0).color(TEXT_SECONDARY),
+                        )
+                        .fill(BG)
+                        .stroke(Stroke::new(1.0_f32, LINE))
+                        .corner_radius(CornerRadius::same(6))
+                        .min_size(Vec2::new(78.0, 30.0)),
                     );
-                    ui.painter().text(
-                        cancel_rect.0.center(),
-                        egui::Align2::CENTER_CENTER,
-                        "Cancel",
-                        FontId::new(12.0, FontFamily::Proportional),
-                        TEXT_DIM,
-                    );
-                    
-                    if cancel_rect.1.clicked() {
+
+                    if cancel.clicked() {
                         self.show_settings = false;
                         
                         // Revert form values to match active config on cancel
@@ -813,30 +918,119 @@ impl OverlayApp {
                     return;
                 }
                 
-                let payload = format!("brido://{}:{}:{}", self.ip, self.port, self.pin);
-                
-                if self.qr_texture.is_none() {
-                    self.qr_texture = Some(crate::ui::qr_panel::generate_qr_texture(ctx, &payload, None));
+                // The fingerprint lets the phone pin this exact certificate.
+                // Older payloads had three fields; the app still accepts those.
+                let fingerprint = self
+                    .cert_fingerprint
+                    .read()
+                    .ok()
+                    .and_then(|f| f.clone())
+                    .unwrap_or_default();
+
+                let payload = if fingerprint.is_empty() {
+                    format!("brido://{}:{}:{}", self.ip, self.port, self.pin)
+                } else {
+                    format!(
+                        "brido://{}:{}:{}:{}",
+                        self.ip, self.port, self.pin, fingerprint
+                    )
+                };
+
+                // Regenerate whenever the payload changes (the fingerprint
+                // usually lands a moment after the panel first opens).
+                if self.qr_texture.is_none() || self.qr_payload != payload {
+                    let prev = self.qr_texture.take();
+                    self.qr_texture =
+                        Some(crate::ui::qr_panel::generate_qr_texture(ctx, &payload, prev));
+                    self.qr_payload = payload.clone();
                 }
-                
+
                 if let Some(tex) = &self.qr_texture {
                     ui.vertical_centered(|ui| {
                         ui.add(egui::Image::new(tex).fit_to_exact_size(Vec2::new(160.0, 160.0)));
                     });
                 }
-                
-                ui.add_space(8.0);
-                ui.label(RichText::new(format!("IP: {}", self.ip)).color(TEXT_PRIMARY));
-                ui.label(RichText::new(format!("Port: {}", self.port)).color(TEXT_PRIMARY));
-                ui.label(RichText::new(format!("PIN: {}", self.pin)).color(ACCENT));
-                
-                ui.add_space(8.0);
-                let conns = self.connected_count.load(std::sync::atomic::Ordering::Relaxed);
-                if conns > 0 {
-                    ui.label(RichText::new(format!("{} device(s) connected", conns)).color(ACCENT));
+
+                // The PIN is what the user reads aloud or types on the phone,
+                // so it gets display weight and 3+3 grouping rather than being
+                // one more label in a stack.
+                ui.add_space(10.0);
+                ui.vertical_centered(|ui| {
+                    let grouped = if self.pin.len() == 6 {
+                        format!("{} {}", &self.pin[..3], &self.pin[3..])
+                    } else {
+                        self.pin.clone()
+                    };
+                    ui.label(
+                        RichText::new(grouped)
+                            .color(ACCENT)
+                            .size(26.0)
+                            .monospace()
+                            .strong(),
+                    );
+                    ui.label(
+                        RichText::new(format!("{}  ·  port {}", self.ip, self.port))
+                            .color(TEXT_SECONDARY)
+                            .size(11.0),
+                    );
+                });
+
+                ui.add_space(10.0);
+                if fingerprint.is_empty() {
+                    ui.label(
+                        RichText::new("Certificate pending…")
+                            .color(YELLOW)
+                            .size(11.0),
+                    );
                 } else {
-                    ui.label(RichText::new("Waiting for connection...").color(TEXT_DIM));
+                    // Short prefix is enough for a human to eyeball a match
+                    // against what the phone reports.
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new("Certificate").color(TEXT_DIM).size(11.0));
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            ui.label(
+                                RichText::new(format!("{}…", &fingerprint[..12]))
+                                    .color(TEXT_SECONDARY)
+                                    .size(11.0)
+                                    .monospace(),
+                            );
+                        });
+                    });
                 }
+
+                let conns = self.connected_count.load(std::sync::atomic::Ordering::Relaxed);
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new("Devices").color(TEXT_DIM).size(11.0));
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        if conns > 0 {
+                            ui.label(
+                                RichText::new(format!("{conns} connected"))
+                                    .color(ACCENT)
+                                    .size(11.0),
+                            );
+                        } else {
+                            ui.label(
+                                RichText::new("waiting").color(TEXT_DIM).size(11.0),
+                            );
+                        }
+                    });
+                });
+
+                ui.add_space(10.0);
+                ui.horizontal(|ui| {
+                    // Manual entry can't carry the fingerprint, so make the
+                    // address easy to hand over.
+                    if ui.button("Copy address").clicked() {
+                        if let Ok(mut clip) = arboard::Clipboard::new() {
+                            let _ = clip
+                                .set_text(format!("{}:{} PIN {}", self.ip, self.port, self.pin));
+                            self.status_text = "Copied to clipboard".to_string();
+                        }
+                    }
+                    if ui.button("New PIN").clicked() {
+                        self.regenerate_pin();
+                    }
+                });
             });
     }
 }
@@ -844,6 +1038,7 @@ impl OverlayApp {
 impl eframe::App for OverlayApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.apply_first_frame_setup(ctx);
+        self.sync_remote_settings();
         self.poll_hotkeys(ctx);
         self.poll_results();
 
@@ -854,6 +1049,100 @@ impl eframe::App for OverlayApp {
             ctx.request_repaint_after(std::time::Duration::from_millis(100));
         }
 
+        // The input row and hint line live in a bottom panel so egui reserves
+        // their height before the central area is laid out. Sizing the response
+        // by subtracting a guessed number is what clipped the hints off the
+        // bottom of the window.
+        if !self.show_settings && !self.show_qr {
+            egui::TopBottomPanel::bottom("brido_input")
+                .frame(
+                    egui::Frame::new()
+                        .fill(BG)
+                        .inner_margin(Margin::symmetric(16, 10)),
+                )
+                .show(ctx, |ui| {
+                    // ── Input area ───────────────────────────────────────
+                    ui.horizontal(|ui| {
+                        let input_width = ui.available_width() - 60.0;
+                        let response = ui.add(
+                            egui::TextEdit::singleline(&mut self.input_text)
+                                .hint_text("Ask a question…")
+                                .desired_width(input_width)
+                                .font(FontId::new(13.0, FontFamily::Proportional)),
+                        );
+
+                        if self.direct_type_active {
+                            response.request_focus();
+                            if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                                self.direct_type_active = false;
+                                use windows::core::PCWSTR;
+                                use windows::Win32::UI::WindowsAndMessaging::FindWindowW;
+                                unsafe {
+                                    let title: Vec<u16> = "Brido Overlay\0".encode_utf16().collect();
+                                    if let Ok(hwnd) = FindWindowW(PCWSTR::null(), PCWSTR(title.as_ptr())) {
+                                        if !hwnd.is_invalid() {
+                                            if self.config.strict_stealth_mode {
+                                                super::stealth::disable_typing(hwnd.0 as isize);
+                                            }
+                                            super::stealth::restore_focus(self.prev_foreground_hwnd);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // Save the foreground window when the text input gains focus
+                        // so we can give it back after submission.
+                        if response.gained_focus() {
+                            let fg = super::stealth::get_foreground_window();
+                            if fg != 0 {
+                                self.prev_foreground_hwnd = fg;
+                            }
+                        }
+
+                        // Submit on Enter
+                        if response.lost_focus()
+                            && ui.input(|i| i.key_pressed(egui::Key::Enter))
+                            && !self.input_text.trim().is_empty()
+                        {
+                            self.submit_question();
+                        }
+
+                        // A real Button: focusable, keyboard-navigable and it
+                        // shows a hand cursor. The hand-painted version had
+                        // none of that.
+                        let send = ui.add_enabled(
+                            !self.input_text.trim().is_empty(),
+                            egui::Button::new(
+                                RichText::new("Send").size(12.0).color(ACCENT).strong(),
+                            )
+                            .fill(SURFACE)
+                            .stroke(Stroke::new(1.0_f32, LINE))
+                            .corner_radius(CornerRadius::same(6))
+                            .min_size(Vec2::new(52.0, 28.0)),
+                        );
+                        if send.clicked() {
+                            self.submit_question();
+                            // Focus restore is handled inside submit_question()
+                        }
+                    });
+
+
+
+                    // ── Shortcut hints ───────────────────────────────────
+                    ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
+                        ui.label(
+                            RichText::new(&format!("{} hide  •  {} capture",
+                                self.config.overlay_hotkey_toggle,
+                                self.config.overlay_hotkey_capture))
+                                .color(TEXT_DIM)
+                                .size(10.0),
+                        );
+                    });
+                    ui.add_space(4.0);
+                });
+        }
+
         let panel_frame = egui::Frame::new()
             .fill(BG)
             .inner_margin(Margin::same(16));
@@ -861,116 +1150,103 @@ impl eframe::App for OverlayApp {
         egui::CentralPanel::default()
             .frame(panel_frame)
             .show(ctx, |ui| {
-                // ── Drag region (title bar replacement) ──────────────
-                let drag_rect = ui.allocate_exact_size(
-                    Vec2::new(ui.available_width(), 28.0),
-                    egui::Sense::hover(),
-                );
-                let drag_response = drag_rect.1;
+                // ── Title bar ────────────────────────────────────────
+                // Laid out right-to-left rather than painted at fixed pixel
+                // offsets: the old version collided with itself as the window
+                // narrowed, and none of the glyphs said what they did.
+                ui.horizontal(|ui| {
+                    ui.label(
+                        RichText::new("BRIDO")
+                            .color(TEXT_DIM)
+                            .size(12.0)
+                            .monospace()
+                            .strong(),
+                    );
 
-                // Draw drag handle
-                let drag_r = drag_rect.0;
-                ui.painter().rect_filled(drag_r, CornerRadius::ZERO, BG);
-
-                // Title
-                ui.painter().text(
-                    drag_r.left_center() + egui::vec2(8.0, 0.0),
-                    egui::Align2::LEFT_CENTER,
-                    "Brido",
-                    FontId::new(13.0, FontFamily::Proportional),
-                    TEXT_DIM,
-                );
-
-                // Exit Button
-                let exit_rect = egui::Rect::from_min_size(
-                    drag_r.right_top() + egui::vec2(-28.0, 2.0),
-                    Vec2::new(24.0, 24.0),
-                );
-                let exit_resp = ui.interact(exit_rect, ui.id().with("exit"), egui::Sense::click());
-                ui.painter().text(
-                    exit_rect.center(),
-                    egui::Align2::CENTER_CENTER,
-                    "X",
-                    FontId::new(14.0, FontFamily::Proportional),
-                    if exit_resp.hovered() { Color32::from_rgb(220, 50, 50) } else { TEXT_DIM },
-                );
-                if exit_resp.clicked() {
-                    ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-                }
-
-                // Phone Icon
-                let phone_rect = egui::Rect::from_min_size(
-                    drag_r.right_top() + egui::vec2(-80.0, 2.0),
-                    Vec2::new(24.0, 24.0),
-                );
-                let phone_resp = ui.interact(phone_rect, ui.id().with("phone"), egui::Sense::click());
-                ui.painter().text(
-                    phone_rect.center(),
-                    egui::Align2::CENTER_CENTER,
-                    "📱",
-                    FontId::new(14.0, FontFamily::Proportional),
-                    if phone_resp.hovered() { TEXT_PRIMARY } else { TEXT_DIM },
-                );
-                if phone_resp.clicked() {
-                    self.show_qr = !self.show_qr;
-                    if self.show_qr {
-                        self.show_settings = false;
+                    let conns = self.connected_count.load(std::sync::atomic::Ordering::Relaxed);
+                    if conns > 0 {
+                        ui.label(
+                            RichText::new(format!("{conns} device"))
+                                .color(ACCENT)
+                                .size(10.0),
+                        );
                     }
-                }
 
-                // Drag Icon
-                let move_rect = egui::Rect::from_min_size(
-                    drag_r.right_top() + egui::vec2(-132.0, 2.0),
-                    Vec2::new(24.0, 24.0),
-                );
-                let move_resp = ui.interact(move_rect, ui.id().with("move"), egui::Sense::drag());
-                ui.painter().text(
-                    move_rect.center(),
-                    egui::Align2::CENTER_CENTER,
-                    "✋",
-                    FontId::new(14.0, FontFamily::Proportional),
-                    if move_resp.hovered() || move_resp.dragged() { TEXT_PRIMARY } else { TEXT_DIM },
-                );
-                if move_resp.dragged() {
-                    ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);
-                }
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        if ui
+                            .add(egui::Button::new(RichText::new("Close").size(11.0).color(TEXT_DIM)).frame(false))
+                            .on_hover_text("Close Brido")
+                            .clicked()
+                        {
+                            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                        }
 
-                // Voice Toggle Icon
-                let voice_rect = egui::Rect::from_min_size(
-                    drag_r.right_top() + egui::vec2(-106.0, 2.0),
-                    Vec2::new(24.0, 24.0),
-                );
-                let voice_resp = ui.interact(voice_rect, ui.id().with("voice"), egui::Sense::click());
-                ui.painter().text(
-                    voice_rect.center(),
-                    egui::Align2::CENTER_CENTER,
-                    if self.voice_mode { "🎙" } else { "🎤" },
-                    FontId::new(14.0, FontFamily::Proportional),
-                    if voice_resp.hovered() { TEXT_PRIMARY } else if self.voice_mode { ACCENT } else { TEXT_DIM },
-                );
-                if voice_resp.clicked() {
-                    self.toggle_voice_mode();
-                }
+                        if ui
+                            .add(egui::Button::new(RichText::new("Settings").size(11.0).color(TEXT_DIM)).frame(false))
+                            .on_hover_text("Settings")
+                            .clicked()
+                        {
+                            self.show_settings = !self.show_settings;
+                            if self.show_settings {
+                                self.show_qr = false;
+                            }
+                        }
 
-                // Gear Icon
-                let gear_rect = egui::Rect::from_min_size(
-                    drag_r.right_top() + egui::vec2(-54.0, 2.0),
-                    Vec2::new(24.0, 24.0),
-                );
-                let gear_resp = ui.interact(gear_rect, ui.id().with("gear"), egui::Sense::click());
-                ui.painter().text(
-                    gear_rect.center(),
-                    egui::Align2::CENTER_CENTER,
-                    "⚙",
-                    FontId::new(16.0, FontFamily::Proportional),
-                    if gear_resp.hovered() { TEXT_PRIMARY } else { TEXT_DIM },
-                );
-                if gear_resp.clicked() {
-                    self.show_settings = !self.show_settings;
-                    if self.show_settings {
-                        self.show_qr = false;
-                    }
-                }
+                        if ui
+                            .add(egui::Button::new(RichText::new("Pair").size(11.0).color(TEXT_DIM)).frame(false))
+                            .on_hover_text("Pair a phone")
+                            .clicked()
+                        {
+                            self.show_qr = !self.show_qr;
+                            if self.show_qr {
+                                self.show_settings = false;
+                            }
+                        }
+
+                        if std::env::var("BRIDO_SHOW_VOICE").as_deref() == Ok("1")
+                            && ui
+                                .add(egui::Button::new(RichText::new("Voice").size(11.0).color(TEXT_DIM)).frame(false))
+                                .on_hover_text("Voice mode")
+                                .clicked()
+                        {
+                            self.toggle_voice_mode();
+                        }
+
+                        // A Button only senses clicks, so the drag handle has
+                        // to re-interact with its own rect for drag events —
+                        // otherwise the window cannot be moved at all.
+                        let handle = ui
+                            .add(egui::Button::new(RichText::new("Move").size(11.0).color(TEXT_DIM)).frame(false))
+                            .on_hover_text("Drag to move");
+                        let drag = ui.interact(
+                            handle.rect,
+                            ui.id().with("move_handle"),
+                            egui::Sense::drag(),
+                        );
+                        if drag.dragged() {
+                            ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);
+                        }
+
+                        // Home returns to the answer view from Settings or
+                        // Pair, so there is always one way back.
+                        let on_home = !self.show_settings && !self.show_qr;
+                        if ui
+                            .add(
+                                egui::Button::new(
+                                    RichText::new("Home")
+                                        .size(11.0)
+                                        .color(if on_home { ACCENT } else { TEXT_DIM }),
+                                )
+                                .frame(false),
+                            )
+                            .on_hover_text("Back to answers")
+                            .clicked()
+                        {
+                            self.show_settings = false;
+                            self.show_qr = false;
+                        }
+                    });
+                });
 
                 // Removed overall drag response
 
@@ -1029,15 +1305,32 @@ impl eframe::App for OverlayApp {
                 } else if self.show_qr {
                     self.render_qr(ctx, ui);
                 } else {
+                    // A copy button, because the whole point is getting the
+                    // answer out of the overlay and into something else.
+                    if !self.response_text.is_empty() {
+                        ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
+                            if ui
+                                .add(egui::Button::new(
+                                    RichText::new("copy").size(10.0).color(TEXT_DIM),
+                                ).frame(false))
+                                .on_hover_text("Copy the answer")
+                                .clicked()
+                            {
+                                if let Ok(mut clip) = arboard::Clipboard::new() {
+                                    let _ = clip.set_text(self.response_text.clone());
+                                    self.status_text = "Answer copied".to_string();
+                                }
+                            }
+                        });
+                    }
+
                     // ── Response area ────────────────────────────────────
-                    let response_height = ui.available_height() - 80.0; // Reserve space for input
                     egui::Frame::new()
                         .fill(SURFACE)
                         .corner_radius(CornerRadius::same(8))
                         .inner_margin(Margin::same(12))
                         .show(ui, |ui| {
                             let mut scroll = ScrollArea::vertical()
-                                .max_height(response_height)
                                 .auto_shrink([false, false]);
 
                             if self.scroll_to_bottom {
@@ -1058,88 +1351,6 @@ impl eframe::App for OverlayApp {
                             });
                         });
 
-                    ui.add_space(8.0);
-
-                    // ── Input area ───────────────────────────────────────
-                    ui.horizontal(|ui| {
-                        let input_width = ui.available_width() - 60.0;
-                        let response = ui.add(
-                            egui::TextEdit::singleline(&mut self.input_text)
-                                .hint_text("Ask a question…")
-                                .desired_width(input_width)
-                                .font(FontId::new(13.0, FontFamily::Proportional)),
-                        );
-
-                        if self.direct_type_active {
-                            response.request_focus();
-                            if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
-                                self.direct_type_active = false;
-                                use windows::core::PCWSTR;
-                                use windows::Win32::UI::WindowsAndMessaging::FindWindowW;
-                                unsafe {
-                                    let title: Vec<u16> = "Brido Overlay\0".encode_utf16().collect();
-                                    if let Ok(hwnd) = FindWindowW(PCWSTR::null(), PCWSTR(title.as_ptr())) {
-                                        if !hwnd.is_invalid() {
-                                            if self.config.strict_stealth_mode {
-                                                super::stealth::disable_typing(hwnd.0 as isize);
-                                            }
-                                            super::stealth::restore_focus(self.prev_foreground_hwnd);
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        // Save the foreground window when the text input gains focus
-                        // so we can give it back after submission.
-                        if response.gained_focus() {
-                            let fg = super::stealth::get_foreground_window();
-                            if fg != 0 {
-                                self.prev_foreground_hwnd = fg;
-                            }
-                        }
-
-                        // Submit on Enter
-                        if response.lost_focus()
-                            && ui.input(|i| i.key_pressed(egui::Key::Enter))
-                            && !self.input_text.trim().is_empty()
-                        {
-                            self.submit_question();
-                        }
-
-                        let btn_rect = ui.allocate_exact_size(Vec2::new(52.0, 28.0), egui::Sense::click());
-                        let fill = if btn_rect.1.hovered() { SURFACE_HOVER } else { SURFACE };
-                        ui.painter().rect(
-                            btn_rect.0,
-                            CornerRadius::same(6),
-                            fill,
-                            Stroke::new(1.0, ACCENT.linear_multiply(0.4)),
-                            StrokeKind::Outside,
-                        );
-                        ui.painter().text(
-                            btn_rect.0.center(),
-                            egui::Align2::CENTER_CENTER,
-                            "Send",
-                            FontId::new(12.0, FontFamily::Proportional),
-                            ACCENT,
-                        );
-                        if btn_rect.1.clicked() && !self.input_text.trim().is_empty() {
-                            self.submit_question();
-                            // Focus restore is handled inside submit_question()
-                        }
-                    });
-
-                    // ── Shortcut hints ───────────────────────────────────
-                    ui.add_space(4.0);
-                    ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
-                        ui.label(
-                            RichText::new(&format!("{} hide  •  {} capture", 
-                                self.config.overlay_hotkey_toggle, 
-                                self.config.overlay_hotkey_capture))
-                                .color(TEXT_DIM)
-                                .size(10.0),
-                        );
-                    });
                 }
             });
     }
@@ -1201,6 +1412,19 @@ fn render_response(ui: &mut egui::Ui, text: &str) {
                 );
             });
     }
+}
+
+/// Uppercase accent section header, matching the app's settings groups.
+fn group_label(ui: &mut egui::Ui, text: &str) {
+    ui.add_space(14.0);
+    ui.label(
+        RichText::new(text.to_uppercase())
+            .color(ACCENT)
+            .size(10.0)
+            .monospace()
+            .strong(),
+    );
+    ui.add_space(5.0);
 }
 
 fn strip_ctrl(s: &str) -> String {

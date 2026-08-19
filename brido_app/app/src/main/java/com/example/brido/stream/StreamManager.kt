@@ -2,7 +2,6 @@ package com.example.brido.stream
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
-import com.example.brido.network.RetrofitClient
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
@@ -10,41 +9,58 @@ import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import okio.ByteString
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 
+/**
+ * @param httpClient the pinned client built during connect, so the stream is
+ *   held to the same certificate as the REST calls.
+ */
 class StreamManager(
+    httpClient: OkHttpClient,
     private val onFrame: (Bitmap) -> Unit,
     private val onConnected: () -> Unit,
     private val onDisconnected: (reason: String) -> Unit,
 ) {
-    private val client = OkHttpClient.Builder()
-        .sslSocketFactory(
-            RetrofitClient.okHttpClient.sslSocketFactory,
-            RetrofitClient.trustManager
-        )
-        .hostnameVerifier { _, _ -> true }
+    // Reuses the pinned TLS configuration; only the timeouts differ, because a
+    // stream should never time out on read the way a request does.
+    private val client = httpClient.newBuilder()
         .connectTimeout(5, TimeUnit.SECONDS)
         .readTimeout(0, TimeUnit.MILLISECONDS)
         .pingInterval(10, TimeUnit.SECONDS)
         .build()
 
-    private var webSocket: WebSocket? = null
+    /**
+     * One live socket plus a flag marking whether its callbacks still matter.
+     *
+     * The flag is cleared *before* we close a socket ourselves, so the close
+     * callback that follows is ignored. Without this, an intentional
+     * reconnect/disconnect fired `onDisconnected("Client closing")`, which the
+     * ViewModel mistook for a dropout and reconnected — an endless loop.
+     */
+    private class Conn(val ws: WebSocket, val active: AtomicBoolean)
+
+    @Volatile
+    private var current: Conn? = null
 
     @Volatile
     var latestFrame: Bitmap? = null
         private set
 
     fun connect(serverIp: String, port: Int, token: String) {
-        disconnect()
+        // Silence the previous socket before opening a new one.
+        closeCurrent(intentional = true, reason = "reconnect")
 
         val url = "wss://$serverIp:$port/ws/stream?token=$token"
         val request = Request.Builder().url(url).build()
 
-        webSocket = client.newWebSocket(request, object : WebSocketListener() {
+        val active = AtomicBoolean(true)
+        val listener = object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
-                onConnected()
+                if (active.get()) onConnected()
             }
 
             override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
+                if (!active.get()) return
                 val data = bytes.toByteArray()
                 val bitmap = BitmapFactory.decodeByteArray(data, 0, data.size)
                 if (bitmap != null) {
@@ -54,6 +70,9 @@ class StreamManager(
             }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+                // `getAndSet(false)` ensures a single disconnect callback per
+                // socket, and never for one we already retired.
+                if (!active.getAndSet(false)) return
                 val responseCode = response?.code
                 val detail = if (responseCode != null) {
                     "${t.message ?: "Connection failed"} (http $responseCode)"
@@ -64,14 +83,27 @@ class StreamManager(
             }
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+                if (!active.getAndSet(false)) return
                 val detail = if (reason.isBlank()) "code=$code" else "code=$code reason=$reason"
                 onDisconnected(detail)
             }
-        })
+        }
+
+        val ws = client.newWebSocket(request, listener)
+        current = Conn(ws, active)
     }
 
+    /** Closes the stream for good (user left, session invalidated). */
     fun disconnect() {
-        webSocket?.close(1000, "Client closing")
-        webSocket = null
+        closeCurrent(intentional = true, reason = "Client closing")
+    }
+
+    private fun closeCurrent(intentional: Boolean, reason: String) {
+        val conn = current ?: return
+        current = null
+        // Retiring the socket first means its onClosed is a no-op, so an
+        // intentional close never looks like a dropout.
+        if (intentional) conn.active.set(false)
+        conn.ws.close(1000, reason)
     }
 }

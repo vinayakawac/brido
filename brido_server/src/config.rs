@@ -62,6 +62,12 @@ const MANAGED_ENV_KEYS: [&str; 17] = [
 #[derive(Clone)]
 pub struct Config {
     pub port: u16,
+    /// Interface to listen on.
+    ///
+    /// Defaults to every interface so the phone can reach the server on any
+    /// network the PC is attached to. Set `BIND_ADDRESS` to a specific address
+    /// (for example the LAN IP, or 127.0.0.1) to narrow that exposure.
+    pub bind_address: String,
     pub pin: String,
     pub capture_fps: u32,
     pub capture_quality: u8,
@@ -95,12 +101,25 @@ impl Config {
             || !self.openrouter_api_key.trim().is_empty()
             || !self.ollama_api_key.trim().is_empty()
     }
+
+    /// Model belonging to the currently selected provider.
+    ///
+    /// Clients that do not name a model get this one, so the desktop's
+    /// provider/model choice is the single source of truth.
+    pub fn active_model(&self) -> &str {
+        match ProviderKind::from_label(&self.active_provider) {
+            Some(ProviderKind::OpenRouter) => &self.openrouter_model,
+            Some(ProviderKind::Ollama) => &self.ollama_model,
+            _ => &self.gemini_model,
+        }
+    }
 }
 
 impl Default for Config {
     fn default() -> Self {
         Self {
             port: 8080,
+            bind_address: env_or_default("BIND_ADDRESS", "0.0.0.0"),
             pin: generate_pin(),
             capture_fps: 15,
             capture_quality: 65,

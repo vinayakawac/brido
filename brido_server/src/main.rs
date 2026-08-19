@@ -9,8 +9,10 @@
 #![windows_subsystem = "windows"]
 
 mod ai_client;
+mod auth;
 mod capture_trigger;
 mod hotkey;
+mod remote_type;
 mod stealth;
 mod window;
 mod server;
@@ -108,7 +110,35 @@ fn main() {
     // ── Background Server ────────────────────────────────────────────
     let server_ready = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let connected_count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
-    let _axum_handle = server::start_server(cfg.clone(), server_ready.clone(), connected_count.clone());
+    // Filled in by the server thread once TLS is up; the QR code needs it.
+    let cert_fingerprint = std::sync::Arc::new(std::sync::RwLock::new(None::<String>));
+    // Trusted devices and the TLS certificate live beside the env file so both
+    // survive a restart — otherwise a new certificate each launch would break
+    // every phone that pinned the old one.
+    let state_dir = runtime_env
+        .active_env_path
+        .parent()
+        .unwrap_or_else(|| std::path::Path::new("."))
+        .to_path_buf();
+    let trusted_store = state_dir.join("trusted_devices.txt");
+
+    // One shared Config for both the GUI and the HTTP API. Previously the
+    // server got a clone at startup, so provider keys edited in Settings never
+    // reached the phone's requests — analysis failed with stale credentials
+    // while the desktop's own capture worked fine.
+    let shared_config = std::sync::Arc::new(std::sync::RwLock::new(cfg.clone()));
+    let settings_version = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
+
+    let _axum_handle = server::start_server(
+        shared_config.clone(),
+        settings_version.clone(),
+        runtime_env.clone(),
+        server_ready.clone(),
+        connected_count.clone(),
+        cert_fingerprint.clone(),
+        trusted_store,
+        state_dir,
+    );
 
     let ip = local_ip_address::local_ip()
         .map(|ip| ip.to_string())
@@ -131,6 +161,9 @@ fn main() {
         port,
         server_ready,
         connected_count,
+        cert_fingerprint,
+        shared_config,
+        settings_version,
     );
 
     let native_options = eframe::NativeOptions {

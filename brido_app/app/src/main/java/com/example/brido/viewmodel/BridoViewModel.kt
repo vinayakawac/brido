@@ -1,22 +1,29 @@
 package com.example.brido.viewmodel
 
+import android.app.Application
 import android.graphics.Bitmap
 import android.util.Base64
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
-import androidx.lifecycle.ViewModel
+import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.brido.data.ConnectionStore
+import com.example.brido.network.ServerTrust
+import okhttp3.OkHttpClient
 import com.example.brido.models.ApiError
 import com.example.brido.models.AnalyseResponse
 import com.example.brido.models.AnalyseRequest
 import com.example.brido.models.ConnectRequest
+import com.example.brido.models.ProviderOption
 import com.example.brido.models.ServerInfo
+import com.example.brido.models.SettingsPayload
 import com.example.brido.network.BridoApiService
 import com.example.brido.network.RetrofitClient
 import com.google.gson.Gson
 import com.google.gson.JsonSyntaxException
+import com.example.brido.stream.StreamKeepAliveService
 import com.example.brido.stream.StreamManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -28,14 +35,19 @@ import java.net.SocketTimeoutException
 import java.net.UnknownHostException
 import javax.net.ssl.SSLException
 
-class BridoViewModel : ViewModel() {
+class BridoViewModel(application: Application) : AndroidViewModel(application) {
     companion object {
-        private const val DEFAULT_ANALYSE_MODEL = "openrouter/free"
+        /** Terminal history cap, so a long session cannot grow without bound. */
+        private const val MAX_TERMINAL_LINES = 500
     }
 
+    private val store = ConnectionStore(application)
+
     // ── Connection state ─────────────────────────────────────────────────
-    var serverIp by mutableStateOf("")
-    var serverPort by mutableStateOf(8080)
+    // Prefilled from the last successful connection so the user is not
+    // retyping an IP address every launch.
+    var serverIp by mutableStateOf(store.lastIp)
+    var serverPort by mutableStateOf(store.lastPort)
     var pin by mutableStateOf("")
     var isConnecting by mutableStateOf(false)
     var isConnected by mutableStateOf(false)
@@ -43,6 +55,28 @@ class BridoViewModel : ViewModel() {
     var token by mutableStateOf("")
     var serverInfo by mutableStateOf<ServerInfo?>(null)
     var trustDevice by mutableStateOf(false)
+
+    /** Certificate fingerprint to enforce, from a QR scan or a past pairing. */
+    private var expectedFingerprint: String? = null
+
+    /** Model the server said it will use; shown so the user knows what ran. */
+    var serverDefaultModel by mutableStateOf<String?>(null)
+        private set
+
+    /** True when a stored trusted token means the PIN can be skipped. */
+    val hasTrustedSession: Boolean
+        get() = store.trustedTokenFor(serverIp, serverPort) != null
+
+    /**
+     * True when a certificate is pinned for this server.
+     *
+     * Exposed so the UI can always offer "Forget this device": a phone that
+     * pinned a certificate on first use, without saving a trusted session, was
+     * otherwise stuck after a legitimate server restart with no way to clear
+     * the stale pin.
+     */
+    val hasPinnedCertificate: Boolean
+        get() = store.fingerprintFor(serverIp) != null
 
     // ── Stream state ─────────────────────────────────────────────────────
     var currentFrame by mutableStateOf<Bitmap?>(null)
@@ -58,29 +92,231 @@ class BridoViewModel : ViewModel() {
 
     // ── Internal ─────────────────────────────────────────────────────────
     private var apiService: BridoApiService? = null
+    private var httpClient: OkHttpClient? = null
     private var streamManager: StreamManager? = null
     private val gson = Gson()
     private var streamReconnectAttempts = 0
     private val maxStreamReconnectAttempts = 3
     private val baseReconnectDelayMs = 1_500L
 
+    /** Set when reconnect attempts are exhausted, so the UI can offer Retry. */
+    var canRetryStream by mutableStateOf(false)
+        private set
+
+    // ── Remote keyboard ──────────────────────────────────────────────────
+    /** When on, the text box types into the PC's focused window instead of
+     *  sending an AI question. */
+    var remoteTypeMode by mutableStateOf(false)
+
+    /** Types [text] at the PC's cursor. Errors surface in the terminal. */
+    fun sendRemoteType(text: String) {
+        if (text.isEmpty()) return
+        dispatchType(com.example.brido.models.TypeRequest(text = text))
+    }
+
+    /**
+     * Presses a named editing key on the PC.
+     *
+     * Accepted names match the server: backspace, delete, left, right, up,
+     * down, home, end, enter, tab.
+     */
+    fun sendRemoteKey(key: String) {
+        dispatchType(com.example.brido.models.TypeRequest(text = "", key = key))
+    }
+
+    private fun dispatchType(request: com.example.brido.models.TypeRequest) {
+        val service = apiService ?: return
+        if (token.isBlank()) return
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) {
+                    service.typeText("Bearer $token", request)
+                }
+            } catch (e: Exception) {
+                addTerminalLine("> type failed: ${e.message ?: "unknown error"}")
+            }
+        }
+    }
+
+    // ── Synced desktop settings ──────────────────────────────────────────
+    // Deliberately in-memory only. These carry live API keys, so they arrive
+    // with the handshake, are never written to disk on the phone, and are
+    // wiped on disconnect — including when the device is marked trusted.
+    var settings by mutableStateOf<SettingsPayload?>(null)
+        private set
+    var providers by mutableStateOf<List<ProviderOption>>(emptyList())
+        private set
+    var isSavingSettings by mutableStateOf(false)
+        private set
+    var settingsMessage by mutableStateOf<String?>(null)
+
+    /** Clears every synced credential from memory. */
+    private fun clearSyncedSettings() {
+        settings = null
+        providers = emptyList()
+        settingsMessage = null
+        serverDefaultModel = null
+    }
+
+    /** Re-reads settings from the desktop (after an edit made there). */
+    fun refreshSettings() {
+        val service = apiService ?: return
+        if (token.isBlank()) return
+        viewModelScope.launch {
+            try {
+                val response = withContext(Dispatchers.IO) {
+                    service.getSettings("Bearer $token")
+                }
+                settings = response.toPayload()
+                providers = response.providers
+            } catch (e: Exception) {
+                settingsMessage = "Could not load settings: ${e.message ?: "unknown error"}"
+            }
+        }
+    }
+
+    /** Pushes edited settings to the desktop, which applies and persists them. */
+    fun saveSettings(updated: SettingsPayload, onSaved: () -> Unit = {}) {
+        val service = apiService ?: return
+        if (token.isBlank()) return
+
+        viewModelScope.launch {
+            isSavingSettings = true
+            settingsMessage = null
+            try {
+                val response = withContext(Dispatchers.IO) {
+                    service.putSettings("Bearer $token", updated)
+                }
+                settings = response.toPayload()
+                providers = response.providers
+                serverDefaultModel = response.toPayload()
+                    .modelFor(response.activeProvider)
+                settingsMessage = "Saved to desktop"
+                onSaved()
+            } catch (e: Exception) {
+                settingsMessage = "Save failed: ${e.message ?: "unknown error"}"
+            } finally {
+                isSavingSettings = false
+            }
+        }
+    }
+
+    /**
+     * Appends a line to the terminal, trimming the oldest entries once the cap
+     * is reached so a long-running session cannot exhaust memory.
+     */
+    private fun addTerminalLine(line: String) {
+        terminalLines.add(line)
+        while (terminalLines.size > MAX_TERMINAL_LINES) {
+            terminalLines.removeAt(0)
+        }
+    }
+
+    /** Retries the stream after reconnect attempts were exhausted. */
+    fun retryStream() {
+        if (!isConnected || token.isBlank()) return
+        streamReconnectAttempts = 0
+        canRetryStream = false
+        addTerminalLine("> retrying stream...")
+        startStream()
+    }
+
+    /** Applies connection details from a scanned QR code, including the pin. */
+    fun applyScannedData(ip: String, port: Int, scannedPin: String, fingerprint: String?) {
+        serverIp = ip
+        serverPort = port
+        pin = scannedPin
+        // A fingerprint from the QR is authoritative — it pins the certificate
+        // before the very first request rather than trusting on first use.
+        expectedFingerprint = ServerTrust.normalise(fingerprint)
+            ?: store.fingerprintFor(ip)
+    }
+
+    /**
+     * Builds a pinned client for the current server.
+     *
+     * Any fingerprint learned during the handshake is persisted so a swapped
+     * certificate is refused next time.
+     */
+    private fun buildSession(): RetrofitClient.Session {
+        val pinned = expectedFingerprint ?: store.fingerprintFor(serverIp)
+        val host = serverIp
+        return RetrofitClient.createSession(
+            serverIp = serverIp,
+            port = serverPort,
+            expectedFingerprint = pinned,
+        ) { accepted ->
+            store.setFingerprintFor(host, accepted)
+            expectedFingerprint = accepted
+        }
+    }
+
     fun connect(onSuccess: () -> Unit) {
         if (serverIp.isBlank() || pin.isBlank()) return
+        performConnect(usePin = true, onSuccess = onSuccess)
+    }
 
+    /**
+     * Reconnects with the stored trusted token, skipping PIN entry.
+     *
+     * If the server has forgotten the device (restarted past the token's life,
+     * or the user revoked it) the token is dropped and the PIN is required.
+     */
+    fun connectWithTrustedToken(onSuccess: () -> Unit) {
+        if (store.trustedTokenFor(serverIp, serverPort) == null) return
+        performConnect(usePin = false, onSuccess = onSuccess)
+    }
+
+    private fun performConnect(usePin: Boolean, onSuccess: () -> Unit) {
         viewModelScope.launch {
             isConnecting = true
             connectionError = null
 
             try {
-                val service = RetrofitClient.getService(serverIp, serverPort)
-                apiService = service
+                val session = withContext(Dispatchers.IO) { buildSession() }
+                apiService = session.service
+                httpClient = session.client
 
-                val response = withContext(Dispatchers.IO) {
-                    service.connect(ConnectRequest(pin))
+                if (usePin) {
+                    val response = withContext(Dispatchers.IO) {
+                        session.service.connect(
+                            ConnectRequest(pin = pin, trustDevice = trustDevice)
+                        )
+                    }
+                    token = response.token
+                    serverInfo = response.systemInfo
+                    serverDefaultModel = response.defaultModel
+                    // Settings ride along with the handshake, so the settings
+                    // screen is populated with zero extra round trips.
+                    settings = response.settings
+                    providers = response.providers
+
+                    if (trustDevice) {
+                        store.saveTrustedSession(serverIp, serverPort, response.token)
+                    } else {
+                        store.clearTrustedSession()
+                    }
+                } else {
+                    val saved = store.trustedTokenFor(serverIp, serverPort)
+                        ?: throw IllegalStateException("No trusted session stored")
+                    // Validate the stored token before treating it as connected.
+                    serverInfo = withContext(Dispatchers.IO) {
+                        session.service.getSystemInfo("Bearer $saved")
+                    }
+                    token = saved
+
+                    // A trusted reconnect skips the PIN but still re-syncs the
+                    // credentials, because they were wiped on the last
+                    // disconnect and are never stored on the device.
+                    val synced = withContext(Dispatchers.IO) {
+                        session.service.getSettings("Bearer $saved")
+                    }
+                    settings = synced.toPayload()
+                    providers = synced.providers
+                    serverDefaultModel = synced.toPayload().modelFor(synced.activeProvider)
                 }
 
-                token = response.token
-                serverInfo = response.systemInfo
+                store.rememberLast(serverIp, serverPort)
                 isConnected = true
                 connectionError = null
 
@@ -90,7 +326,14 @@ class BridoViewModel : ViewModel() {
                 onSuccess()
             } catch (e: retrofit2.HttpException) {
                 connectionError = when (e.code()) {
-                    401 -> "Invalid PIN"
+                    401 -> if (usePin) {
+                        "Invalid PIN"
+                    } else {
+                        // Stored token is no longer good; fall back to the PIN.
+                        store.clearTrustedSession()
+                        "Saved session expired. Enter the PIN again."
+                    }
+                    429 -> "Too many failed attempts. Wait a moment and retry."
                     else -> "Server error: ${e.code()}"
                 }
             } catch (e: Exception) {
@@ -101,10 +344,25 @@ class BridoViewModel : ViewModel() {
         }
     }
 
+    /** Forgets the saved token and pinned certificate for this server. */
+    fun forgetThisDevice() {
+        store.clearTrustedSession()
+        store.clearFingerprintFor(serverIp)
+        expectedFingerprint = null
+        trustDevice = false
+        // Clear the pin-mismatch message so it is obvious the state was reset
+        // and the next attempt starts fresh.
+        connectionError = null
+    }
+
     private fun startStream() {
         streamManager?.disconnect()
+        canRetryStream = false
+
+        val client = httpClient ?: return
 
         streamManager = StreamManager(
+            httpClient = client,
             onFrame = { bitmap ->
                 viewModelScope.launch(Dispatchers.Main) {
                     currentFrame = bitmap
@@ -114,6 +372,9 @@ class BridoViewModel : ViewModel() {
                 viewModelScope.launch(Dispatchers.Main) {
                     isStreaming = true
                     streamReconnectAttempts = 0
+                    // Foreground service keeps the process alive once the user
+                    // switches away from the app.
+                    StreamKeepAliveService.start(getApplication())
                 }
             },
             onDisconnected = { reason ->
@@ -124,13 +385,13 @@ class BridoViewModel : ViewModel() {
                     }
 
                     if (reason.contains("401") || reason.contains("403") || reason.contains("Unauthorized", ignoreCase = true)) {
-                        terminalLines.add("> stream disconnected: unauthorized session")
+                        addTerminalLine("> stream disconnected: unauthorized session")
                         invalidateSession("Session expired. Reconnect required.")
                         return@launch
                     }
 
                     if (reason.isNotBlank()) {
-                        terminalLines.add("> stream disconnected: $reason")
+                        addTerminalLine("> stream disconnected: $reason")
                     }
 
                     if (!isConnected || token.isBlank()) {
@@ -138,14 +399,17 @@ class BridoViewModel : ViewModel() {
                     }
 
                     if (streamReconnectAttempts >= maxStreamReconnectAttempts) {
-                        terminalLines.add("> stream reconnect failed after $maxStreamReconnectAttempts attempts")
-                        terminalLines.add("> hint: tap disconnect and connect again")
+                        addTerminalLine("> stream reconnect failed after $maxStreamReconnectAttempts attempts")
+                        addTerminalLine("> hint: tap Retry to try again")
+                        // Surfaces a Retry button rather than making the user
+                        // guess that disconnect-then-connect is the fix.
+                        canRetryStream = true
                         return@launch
                     }
 
                     val delayMs = baseReconnectDelayMs * (1 shl streamReconnectAttempts)
                     streamReconnectAttempts += 1
-                    terminalLines.add("> reconnecting stream in ${delayMs / 1000.0}s...")
+                    addTerminalLine("> reconnecting stream in ${delayMs / 1000.0}s...")
                     delay(delayMs)
 
                     if (isConnected && token.isNotBlank()) {
@@ -158,15 +422,26 @@ class BridoViewModel : ViewModel() {
         streamManager?.connect(serverIp, serverPort, token)
     }
 
-    fun analyse() {
+    /**
+     * Captures the latest frame and asks the server to analyse it.
+     *
+     * @param question optional free-text prompt; when omitted the server uses
+     *   its own default prompt, exactly as the desktop overlay does.
+     */
+    fun analyse(question: String? = null) {
         val frame = streamManager?.latestFrame ?: currentFrame
         if (frame == null || isAnalysing) return
+
+        val prompt = question?.trim()?.takeIf { it.isNotEmpty() }
 
         // Set immediately to avoid double-tap races creating overlapping requests.
         isAnalysing = true
 
         viewModelScope.launch {
-            terminalLines.add("> analysing frame...")
+            if (prompt != null) {
+                addTerminalLine("> Q: $prompt")
+            }
+            addTerminalLine("> analysing frame...")
 
             try {
                 suspend fun encodeFrame(maxWidth: Int, quality: Int): String = withContext(Dispatchers.Default) {
@@ -192,7 +467,12 @@ class BridoViewModel : ViewModel() {
                         token = "Bearer $token",
                         request = AnalyseRequest(
                             imageBase64 = imageBase64,
-                            model = DEFAULT_ANALYSE_MODEL,
+                            // No model is named on purpose: the server uses the
+                            // provider and model configured on the desktop, so
+                            // there is one source of truth and no hardcoded
+                            // free-tier fallback.
+                            model = null,
+                            prompt = prompt,
                         ),
                     )
                 }
@@ -212,14 +492,14 @@ class BridoViewModel : ViewModel() {
                             throw e
                         }
 
-                        terminalLines.add("> retrying with smaller frame (${retryReasonForStatus(e.code())})...")
+                        addTerminalLine("> retrying with smaller frame (${retryReasonForStatus(e.code())})...")
                     } catch (e: Exception) {
                         lastError = e
                         if (index == presets.lastIndex) {
                             throw e
                         }
 
-                        terminalLines.add("> transient network issue, retrying...")
+                        addTerminalLine("> transient network issue, retrying...")
                     }
                 }
 
@@ -227,8 +507,8 @@ class BridoViewModel : ViewModel() {
                     ?: IllegalStateException("Analysis failed without a response")
 
                 // Add full response as one block (server prefixes with [model-name])
-                terminalLines.add(resolvedResponse.result.trim())
-                terminalLines.add("")
+                addTerminalLine(resolvedResponse.result.trim())
+                addTerminalLine("")
             } catch (e: Exception) {
                 val errorText = when (e) {
                     is retrofit2.HttpException -> {
@@ -242,7 +522,7 @@ class BridoViewModel : ViewModel() {
                     else -> e.message ?: "Unknown error"
                 }
 
-                terminalLines.add("> error: $errorText")
+                addTerminalLine("> error: $errorText")
             } finally {
                 isAnalysing = false
             }
@@ -328,35 +608,81 @@ class BridoViewModel : ViewModel() {
             is UnknownHostException -> "Cannot resolve server address. Check IP and network."
             is ConnectException -> "Server refused connection. Confirm server is running and port is correct."
             is SocketTimeoutException -> "Connection timed out. Check network quality and server responsiveness."
-            is SSLException -> "TLS handshake failed. Reconnect and accept the local certificate."
+            is SSLException -> {
+                // A pin mismatch surfaces here. Say so plainly: the usual cause
+                // is a restarted server (new certificate), but it is also what
+                // an interception attempt looks like.
+                val detail = error.message.orEmpty()
+                if (detail.contains("pinned", ignoreCase = true) ||
+                    detail.contains("fingerprint", ignoreCase = true)
+                ) {
+                    "Server certificate changed. If you restarted the server, tap " +
+                        "\"Forget this device\" and pair again — otherwise the connection " +
+                        "may be intercepted."
+                } else {
+                    "TLS handshake failed: ${detail.ifBlank { "could not establish a secure connection" }}"
+                }
+            }
             else -> "Cannot reach server: ${error.message ?: "Unknown error"}"
         }
     }
 
     private fun invalidateSession(reason: String) {
+        StreamKeepAliveService.stop(getApplication())
         streamManager?.disconnect()
         streamManager = null
         isStreaming = false
         isConnected = false
+        canRetryStream = false
         token = ""
         apiService = null
+        httpClient = null
+        clearSyncedSettings()
+        // The server already refused this token, so drop any saved copy.
+        store.clearTrustedSession()
         connectionError = reason
     }
 
     fun disconnect() {
+        // Revoke server-side first, otherwise the token stays valid for its
+        // full lifetime and signing out would be cosmetic only.
+        val currentToken = token
+        val service = apiService
+        val keepTrusted = trustDevice && store.trustedTokenFor(serverIp, serverPort) != null
+
+        if (service != null && currentToken.isNotBlank() && !keepTrusted) {
+            viewModelScope.launch {
+                try {
+                    withContext(Dispatchers.IO) {
+                        service.disconnect("Bearer $currentToken")
+                    }
+                } catch (_: Exception) {
+                    // Best effort: if the server is already gone the token dies
+                    // with it, and it expires on its own regardless.
+                }
+            }
+        }
+
+        StreamKeepAliveService.stop(getApplication())
         streamManager?.disconnect()
         streamManager = null
         isStreaming = false
         isConnected = false
+        canRetryStream = false
         currentFrame = null
         token = ""
         terminalLines.clear()
         connectionError = null
         apiService = null
+        httpClient = null
+        // Synced credentials never outlive the connection.
+        clearSyncedSettings()
     }
 
     override fun onCleared() {
         super.onCleared()
+        StreamKeepAliveService.stop(getApplication())
         streamManager?.disconnect()
+        clearSyncedSettings()
     }
 }
