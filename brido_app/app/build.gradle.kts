@@ -1,7 +1,17 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
 }
+
+// Signing credentials come from local.properties, which is gitignored, so the
+// keystore password never enters the repository or the build log.
+val signingProps = Properties().apply {
+    val f = rootProject.file("local.properties")
+    if (f.exists()) f.inputStream().use { load(it) }
+}
+val hasSigning = signingProps.getProperty("RELEASE_STORE_PASSWORD") != null
 
 android {
     namespace = "com.example.brido"
@@ -21,8 +31,28 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    signingConfigs {
+        if (hasSigning) {
+            create("release") {
+                storeFile = file(
+                    signingProps.getProperty("RELEASE_STORE_FILE")
+                        ?: "brido-release-key.jks"
+                )
+                storePassword = signingProps.getProperty("RELEASE_STORE_PASSWORD")
+                keyAlias = signingProps.getProperty("RELEASE_KEY_ALIAS")
+                keyPassword = signingProps.getProperty("RELEASE_KEY_PASSWORD")
+                    ?: signingProps.getProperty("RELEASE_STORE_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         release {
+            // Falls back to an unsigned build when no credentials are present,
+            // so the project still builds for anyone cloning it.
+            if (hasSigning) {
+                signingConfig = signingConfigs.getByName("release")
+            }
             isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
