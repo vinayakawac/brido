@@ -13,15 +13,20 @@ import androidx.core.view.WindowCompat
 
 private val BridoColorScheme = darkColorScheme(
     primary = BridoAccent,
+    onPrimary = BridoOnAccent,
     secondary = BridoSurfaceVariant,
-    tertiary = BridoInfoBlue,
-    background = BridoDark,
-    surface = BridoSurface,
-    onPrimary = Color.White,
     onSecondary = BridoTextPrimary,
-    onTertiary = Color.White,
+    tertiary = BridoInfoBlue,
+    onTertiary = BridoTextPrimary,
+    background = BridoDark,
     onBackground = BridoTextPrimary,
+    surface = BridoSurface,
     onSurface = BridoTextPrimary,
+    surfaceVariant = BridoSurfaceVariant,
+    onSurfaceVariant = BridoTextSecondary,
+    outline = BridoLine,
+    error = BridoDanger,
+    onError = BridoOnAccent,
 )
 
 @Composable
