@@ -142,6 +142,19 @@ phone, and both on the same Wi‑Fi.
 
 ---
 
+## Support the project
+
+Brido is free and open source. If it's useful to you, buying a coffee keeps it
+moving.
+
+<div align="center">
+
+[![Support Brido on Ko-fi](https://storage.ko-fi.com/cdn/kofi3.png?v=3)](https://ko-fi.com/F2Q7236MTE)
+
+</div>
+
+---
+
 ## License
 
 Apache 2.0. See [LICENSE](LICENSE).

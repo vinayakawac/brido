@@ -1,5 +1,9 @@
 package com.example.brido.screens
 
+import android.content.Intent
+import android.net.Uri
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -10,6 +14,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBars
@@ -21,7 +26,9 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Switch
@@ -36,7 +43,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -45,6 +54,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.brido.R
 import com.example.brido.ui.components.GroupLabel
 import com.example.brido.ui.components.InstrumentShape
 import com.example.brido.ui.components.NotePanel
@@ -281,7 +291,83 @@ private fun ManualEntryTab(
 
         NotePanel("Find the address and PIN in the Brido window on your PC.")
 
+        Spacer(Modifier.height(20.dp))
+
+        LinkButtons()
+
         Spacer(Modifier.height(24.dp))
+    }
+}
+
+/**
+ * Project links: the source, and a way to support it.
+ *
+ * Each opens in the browser rather than an in-app view, so the user can see
+ * where they are going before signing in anywhere.
+ */
+@Composable
+private fun LinkButtons() {
+    val context = LocalContext.current
+
+    fun open(url: String) {
+        runCatching {
+            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+        }
+    }
+
+    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        // GitHub — vector mark, tinted to match the surrounding text.
+        OutlinedButton(
+            onClick = { open("https://github.com/vinayakawac/brido") },
+            shape = InstrumentShape,
+            border = BorderStroke(1.dp, BridoLine),
+            colors = ButtonDefaults.outlinedButtonColors(
+                containerColor = BridoSurface,
+                contentColor = BridoTextPrimary,
+            ),
+            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 12.dp),
+            modifier = Modifier.weight(1f),
+        ) {
+            Icon(
+                painter = painterResource(R.drawable.ic_github),
+                contentDescription = null,
+                tint = BridoTextPrimary,
+                modifier = Modifier.size(18.dp),
+            )
+            Spacer(Modifier.width(8.dp))
+            Text(
+                "Source",
+                fontSize = 12.sp,
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.Bold,
+            )
+        }
+
+        // Ko-fi — official brand asset, so it is left untinted.
+        OutlinedButton(
+            onClick = { open("https://ko-fi.com/F2Q7236MTE") },
+            shape = InstrumentShape,
+            border = BorderStroke(1.dp, BridoLine),
+            colors = ButtonDefaults.outlinedButtonColors(
+                containerColor = BridoSurface,
+                contentColor = BridoTextPrimary,
+            ),
+            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 12.dp),
+            modifier = Modifier.weight(1f),
+        ) {
+            Image(
+                painter = painterResource(R.drawable.ic_kofi),
+                contentDescription = null,
+                modifier = Modifier.size(18.dp),
+            )
+            Spacer(Modifier.width(8.dp))
+            Text(
+                "Support",
+                fontSize = 12.sp,
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.Bold,
+            )
+        }
     }
 }
 
