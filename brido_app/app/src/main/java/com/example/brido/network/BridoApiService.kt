@@ -8,6 +8,8 @@ import com.example.brido.models.ModelInfo
 import com.example.brido.models.ServerInfo
 import com.example.brido.models.SettingsPayload
 import com.example.brido.models.SettingsResponse
+import com.example.brido.models.TypeRequest
+import com.example.brido.models.TypeResponse
 import retrofit2.http.Body
 import retrofit2.http.GET
 import retrofit2.http.Header
@@ -45,4 +47,11 @@ interface BridoApiService {
         @Header("Authorization") token: String,
         @Body request: AnalyseRequest,
     ): AnalyseResponse
+
+    /** Types text into the focused window on the PC (remote keyboard). */
+    @POST("api/type")
+    suspend fun typeText(
+        @Header("Authorization") token: String,
+        @Body request: TypeRequest,
+    ): TypeResponse
 }

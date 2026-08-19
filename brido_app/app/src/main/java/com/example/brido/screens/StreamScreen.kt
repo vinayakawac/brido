@@ -175,9 +175,12 @@ fun StreamScreen(
             }
         }
 
-        // ── Question input ───────────────────────────────────────────────
-        // Matches the desktop overlay, which can ask free-text questions about
-        // the captured frame. Leaving it blank uses the server's default prompt.
+        // ── Text input ───────────────────────────────────────────────────
+        // Two modes, chosen by the keyboard toggle:
+        //  • AI (default): free-text question about the captured frame.
+        //  • Type: acts as a remote keyboard — text is typed at the cursor in
+        //    the PC's focused window, like a Bluetooth keyboard.
+        val remoteMode = viewModel.remoteTypeMode
         Row(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier
@@ -185,25 +188,40 @@ fun StreamScreen(
                 .padding(horizontal = 12.dp)
                 .padding(top = 8.dp),
         ) {
+            // Explicit two-state mode toggle beside the text box: AI (chatbot)
+            // vs PC (remote keyboard). The lit half shows the active mode.
+            ModeToggle(
+                remoteMode = remoteMode,
+                onSelect = { viewModel.remoteTypeMode = it },
+            )
+            Spacer(Modifier.width(8.dp))
+
             OutlinedTextField(
                 value = question,
                 onValueChange = { question = it },
                 placeholder = {
                     Text(
-                        "Ask about this screen…",
+                        if (remoteMode) "Type to your PC…" else "Ask about this screen…",
                         color = BridoTextSecondary.copy(alpha = 0.6f),
                         fontSize = 13.sp,
                     )
                 },
                 singleLine = true,
-                enabled = !viewModel.isAnalysing,
+                enabled = remoteMode || !viewModel.isAnalysing,
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
                 keyboardActions = KeyboardActions(
                     onSend = {
-                        focusManager.clearFocus()
-                        if (viewModel.isStreaming && !viewModel.isAnalysing) {
-                            viewModel.analyse(question)
+                        if (remoteMode) {
+                            // Append a newline so Enter on the phone presses
+                            // Enter on the PC too.
+                            viewModel.sendRemoteType(question + "\n")
                             question = ""
+                        } else {
+                            focusManager.clearFocus()
+                            if (viewModel.isStreaming && !viewModel.isAnalysing) {
+                                viewModel.analyse(question)
+                                question = ""
+                            }
                         }
                     },
                 ),
@@ -211,10 +229,35 @@ fun StreamScreen(
                     focusedTextColor = BridoTextPrimary,
                     unfocusedTextColor = BridoTextPrimary,
                     cursorColor = BridoAccent,
-                    focusedBorderColor = BridoAccent,
+                    focusedBorderColor = if (remoteMode) BridoAccent else BridoAccent,
                     unfocusedBorderColor = BridoSurfaceVariant,
                 ),
                 modifier = Modifier.weight(1f),
+            )
+
+            if (remoteMode) {
+                Spacer(Modifier.width(8.dp))
+                Button(
+                    onClick = {
+                        viewModel.sendRemoteType(question)
+                        question = ""
+                    },
+                    enabled = question.isNotEmpty(),
+                    colors = ButtonDefaults.buttonColors(containerColor = BridoAccent),
+                    shape = RoundedCornerShape(8.dp),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 14.dp),
+                ) {
+                    Text("Type", color = Color.White, fontSize = 13.sp)
+                }
+            }
+        }
+
+        if (remoteMode) {
+            Text(
+                "Remote keyboard: text types into whatever window is focused on your PC.",
+                color = BridoTextSecondary,
+                fontSize = 11.sp,
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 2.dp),
             )
         }
 
@@ -274,6 +317,43 @@ fun StreamScreen(
             )
         }
     }
+}
+
+/**
+ * Segmented AI/PC toggle placed beside the text box.
+ *
+ * "AI" sends the box contents to the model (chatbot); "PC" types them into the
+ * focused window on the desktop (remote keyboard). The active half is filled
+ * with the accent colour so the current mode is unmistakable at a glance.
+ */
+@Composable
+private fun ModeToggle(
+    remoteMode: Boolean,
+    onSelect: (Boolean) -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(8.dp))
+            .background(BridoSurfaceVariant),
+    ) {
+        ModeHalf(label = "AI", selected = !remoteMode) { onSelect(false) }
+        ModeHalf(label = "PC", selected = remoteMode) { onSelect(true) }
+    }
+}
+
+@Composable
+private fun ModeHalf(label: String, selected: Boolean, onClick: () -> Unit) {
+    Text(
+        text = label,
+        color = if (selected) Color.White else BridoTextSecondary,
+        fontSize = 12.sp,
+        fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+        modifier = Modifier
+            .clip(RoundedCornerShape(8.dp))
+            .background(if (selected) BridoAccent else Color.Transparent)
+            .clickable { onClick() }
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+    )
 }
 
 @Composable
